@@ -30,17 +30,24 @@ RPC_URL=https://...  # RPC URL for your network
 
 ## Usage
 
-### Send Deployment Transaction
+### Deploy Safe 1.3.0 Canonical Contracts
 
-Deploy a contract using a deployment data JSON file:
+Deploy all Safe 1.3.0 canonical contracts in batch:
 
 ```bash
-pnpm send-deployment-tx <path-to-deployment-data.json> --network <network-name>
+pnpm deploy-1.3.0-canonical --network <network-name>
 ```
 
 **Example:**
 ```bash
-pnpm send-deployment-tx contracts/deployement-data/module/social-recovery/0.1.0.json --network sepolia
+# Set environment variables first
+export CHAIN_ID=11155111
+export CUSTOM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
+export PRIVATE_KEY=0x...
+export BLOCK_EXPLORER_URL=https://sepolia.etherscan.io
+
+# Run deployment
+pnpm deploy-1.3.0-canonical --network sepolia
 ```
 
 ### Deployment Data Files
@@ -57,10 +64,21 @@ This repository includes GitHub Actions workflows for automated deployments:
 
 ### Manual Deployment
 
+#### Deploy Single Contract
 1. Go to **Actions** tab in GitHub
 2. Select **"Deploy Safe Contracts"** or **"Deploy Specific Contract"**
 3. Click **"Run workflow"**
 4. Fill in the required inputs
+
+#### Deploy Safe 1.3.0 Canonical Contracts (Batch)
+1. Go to **Actions** tab in GitHub
+2. Select **"Deploy Safe 1.3.0 Canonical Contracts"**
+3. Click **"Run workflow"**
+4. Fill in:
+   - **Chain ID**: The chain ID number
+   - **Custom RPC URL**: Your network's RPC endpoint
+   - **Block Explorer URL**: (Optional) Block explorer URL
+   - **Network Name**: (Optional) Network identifier
 
 ### Required Secrets
 
@@ -91,7 +109,7 @@ See `.github/workflows/README.md` for detailed setup instructions.
 │           ├── 1.4.1/
 │           └── 1.5.0/
 ├── scripts/
-│   └── send-deployment-tx.ts # Main deployment script
+│   └── deploy-1.3.0-canonical.ts # Batch deployment script for Safe 1.3.0 canonical contracts
 ├── .github/
 │   └── workflows/            # GitHub Actions workflows
 └── package.json

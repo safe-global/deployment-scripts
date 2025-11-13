@@ -101,6 +101,51 @@ function saveDeploymentTransaction(
 }
 
 /**
+ * Creates a GitHub Actions compatible deployment summary file
+ */
+function createGitHubActionsSummary(
+  results: DeploymentResult[],
+  networkName: string,
+  chainId: string | number
+): void {
+  const deploymentsDir = path.join(process.cwd(), "deployments");
+  
+  // Create deployments directory if it doesn't exist
+  if (!fs.existsSync(deploymentsDir)) {
+    fs.mkdirSync(deploymentsDir, { recursive: true });
+  }
+
+  const summary = {
+    network: networkName,
+    chainId: chainId.toString(),
+    timestamp: new Date().toISOString(),
+    totalContracts: results.length,
+    successful: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    deployments: results.map(result => ({
+      contractName: result.contractName,
+      success: result.success,
+      txHash: result.txHash || null,
+      blockNumber: result.blockNumber ? result.blockNumber.toString() : null,
+      contractAddress: result.contractAddress || null,
+      expectedAddress: result.expectedAddress || null,
+      gasUsed: result.gasUsed ? result.gasUsed.toString() : null,
+      error: result.error || null,
+    })),
+  };
+
+  // Save GitHub Actions summary file
+  const githubSummaryFile = path.join(deploymentsDir, `github-actions-summary-${networkName}-${Date.now()}.json`);
+  fs.writeFileSync(githubSummaryFile, JSON.stringify(summary, null, 2));
+  console.log(`\n💾 Saved GitHub Actions summary to: ${githubSummaryFile}`);
+
+  // Also save a latest version for easy access
+  const latestSummaryFile = path.join(deploymentsDir, `github-actions-summary-${networkName}-latest.json`);
+  fs.writeFileSync(latestSummaryFile, JSON.stringify(summary, null, 2));
+  console.log(`💾 Saved latest summary to: ${latestSummaryFile}`);
+}
+
+/**
  * Creates a custom chain from environment variables
  * Supports: CHAIN_ID, CHAIN_NAME, NATIVE_CURRENCY_NAME, NATIVE_CURRENCY_SYMBOL, 
  * NATIVE_CURRENCY_DECIMALS, BLOCK_EXPLORER_URL
@@ -550,14 +595,24 @@ async function main() {
       if (result.txHash) {
         fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}tx_hash=${result.txHash}\n`);
       }
+      if (result.blockNumber) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}block_number=${result.blockNumber.toString()}\n`);
+      }
       if (result.contractAddress) {
         fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}address=${result.contractAddress}\n`);
+      }
+      if (result.gasUsed) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}gas_used=${result.gasUsed.toString()}\n`);
       }
       if (result.error) {
         fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}error=${result.error}\n`);
       }
     });
   }
+
+  // Create GitHub Actions summary file
+  const finalChainId = await publicClient.getChainId();
+  createGitHubActionsSummary(results, networkName, finalChainId);
 
   // Exit with error code if any deployments failed
   if (failureCount > 0) {

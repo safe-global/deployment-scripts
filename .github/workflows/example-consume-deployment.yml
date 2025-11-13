@@ -1,0 +1,110 @@
+name: Example - Consume Deployment Results
+
+on:
+  workflow_run:
+    workflows: ["Deploy Safe 1.3.0 Canonical Contracts"]
+    types:
+      - completed
+
+jobs:
+  process-deployment:
+    name: Process Deployment Results
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download deployment summary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-summary
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: ./deployment-artifacts
+
+      - name: Process deployment results
+        run: |
+          if [ -f "./deployment-artifacts/deployment-summary.json" ]; then
+            echo "## Deployment Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Install jq if not available
+            if ! command -v jq &> /dev/null; then
+              sudo apt-get update && sudo apt-get install -y jq
+            fi
+            
+            # Extract key information
+            NETWORK=$(jq -r '.network' ./deployment-artifacts/deployment-summary.json)
+            CHAIN_ID=$(jq -r '.chainId' ./deployment-artifacts/deployment-summary.json)
+            TOTAL=$(jq -r '.totalContracts' ./deployment-artifacts/deployment-summary.json)
+            SUCCESSFUL=$(jq -r '.successful' ./deployment-artifacts/deployment-summary.json)
+            FAILED=$(jq -r '.failed' ./deployment-artifacts/deployment-summary.json)
+            
+            echo "- **Network**: $NETWORK" >> $GITHUB_STEP_SUMMARY
+            echo "- **Chain ID**: $CHAIN_ID" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Contracts**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+            echo "- **Successful**: $SUCCESSFUL" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # List all deployments with transaction hashes and block numbers
+            echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Contract | Status | TX Hash | Block Number | Address |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|--------|---------|--------------|---------|" >> $GITHUB_STEP_SUMMARY
+            
+            jq -r '.deployments[] | "| \(.contractName) | \(if .success then "✅" else "❌" end) | \(.txHash // "N/A") | \(.blockNumber // "N/A") | \(.contractAddress // "N/A") |"' ./deployment-artifacts/deployment-summary.json >> $GITHUB_STEP_SUMMARY
+            
+            # Extract transaction hashes and block numbers for further processing
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Transaction Hashes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            jq -r '.deployments[] | select(.txHash != null) | "- \(.contractName): `\(.txHash)` (Block: \(.blockNumber))"' ./deployment-artifacts/deployment-summary.json >> $GITHUB_STEP_SUMMARY
+            
+            # Save to output for other steps
+            echo "DEPLOYMENT_SUMMARY_FILE=./deployment-artifacts/deployment-summary.json" >> $GITHUB_ENV
+            echo "NETWORK=$NETWORK" >> $GITHUB_ENV
+            echo "CHAIN_ID=$CHAIN_ID" >> $GITHUB_ENV
+            echo "TOTAL_CONTRACTS=$TOTAL" >> $GITHUB_ENV
+            echo "SUCCESSFUL_DEPLOYMENTS=$SUCCESSFUL" >> $GITHUB_ENV
+            echo "FAILED_DEPLOYMENTS=$FAILED" >> $GITHUB_ENV
+            
+            # Export transaction hashes as JSON array
+            jq -c '[.deployments[] | select(.txHash != null) | {contract: .contractName, txHash: .txHash, blockNumber: .blockNumber, address: .contractAddress}]' ./deployment-artifacts/deployment-summary.json > tx-hashes.json
+            echo "TX_HASHES_FILE=tx-hashes.json" >> $GITHUB_ENV
+            
+          else
+            echo "::error::Deployment summary file not found"
+            exit 1
+          fi
+
+      - name: Example - Use transaction data
+        run: |
+          if [ -f "$DEPLOYMENT_SUMMARY_FILE" ]; then
+            echo "Processing deployment results..."
+            echo "Network: $NETWORK"
+            echo "Chain ID: $CHAIN_ID"
+            echo "Total contracts deployed: $TOTAL_CONTRACTS"
+            echo "Successful: $SUCCESSFUL_DEPLOYMENTS"
+            echo "Failed: $FAILED_DEPLOYMENTS"
+            
+            # Example: Process each transaction hash
+            if [ -f "$TX_HASHES_FILE" ]; then
+              echo ""
+              echo "Transaction hashes and block numbers:"
+              cat "$TX_HASHES_FILE"
+            fi
+          fi
+
+      - name: Upload processed results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-deployment-results
+          path: |
+            tx-hashes.json
+            ./deployment-artifacts/deployment-summary.json
+          retention-days: 30
+

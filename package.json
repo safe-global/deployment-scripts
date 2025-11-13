@@ -1,0 +1,19 @@
+{
+  "name": "safe-deployments-scripts",
+  "version": "1.0.0",
+  "description": "Deployment scripts for Safe Smart Account contracts from multiple releases",
+  "private": true,
+  "scripts": {
+    "send-deployment-tx": "tsx scripts/send-deployment-tx.ts"
+  },
+  "devDependencies": {
+    "@safe-global/safe-singleton-factory": "^1.0.44",
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "viem": "^2.39.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}

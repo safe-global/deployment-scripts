@@ -1,0 +1,24 @@
+{
+  "name": "Safe Deployments Scripts",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "nomicfoundation.hardhat-solidity"
+      ]
+    }
+  },
+
+  "postCreateCommand": "corepack enable && corepack prepare pnpm@latest --activate && pnpm install && git submodule update --init --recursive",
+
+  "remoteUser": "node"
+}
+
+

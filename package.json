@@ -6,7 +6,10 @@
   "scripts": {
     "deploy-1.3.0-canonical": "tsx scripts/deploy-1.3.0-canonical.ts",
     "deploy-1.4.1": "tsx scripts/deploy-1.4.1.ts",
-    "deploy-1.5.0": "tsx scripts/deploy-1.5.0.ts"
+    "deploy-1.5.0": "tsx scripts/deploy-1.5.0.ts",
+    "create-github-issue": "tsx scripts/create-github-issue.ts",
+    "create-chain-addition-issue": "tsx scripts/create-chain-addition-issue.ts",
+    "create-chain-issue": "tsx scripts/create-chain-addition-issue.ts"
   },
   "devDependencies": {
     "@safe-global/safe-singleton-factory": "^1.0.44",

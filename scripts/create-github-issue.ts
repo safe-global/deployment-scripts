@@ -366,13 +366,19 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
 
   // Get GitHub token from environment (optional - will try without token first)
   const token = process.env.GITHUB_TOKEN;
+  
+  // Debug mode: show request/response details
+  const debugMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
 
   let issueBody = body;
   // Preserve explicitly provided labels - they take precedence
+  // Labels will be added AFTER issue creation using the labels endpoint
   let issueLabels = labels && labels.length > 0 ? labels : undefined;
   let issueAssignees = assignees;
 
-  console.log(`🏷️  Initial labels:`, issueLabels);
+  if (issueLabels && issueLabels.length > 0) {
+    console.log(`🏷️  Labels to add after issue creation: ${issueLabels.join(', ')}`);
+  }
 
   // If template is specified, fetch and use it
   if (template) {
@@ -423,13 +429,13 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
             .split(',')
             .map(l => l.trim().replace(/^["']|["']$/g, ''))
             .filter(l => l.length > 0);
-          console.log(`📌 Extracted labels from template (array syntax): ${issueLabels.join(', ')}`);
+          console.log(`📌 Extracted labels from template (will add after issue creation): ${issueLabels.join(', ')}`);
         } else {
           // Try list syntax: labels:\n  - label1\n  - label2
           const labelsListMatch = selectedTemplate.content.match(/labels:\s*\n((?:\s*-\s*[^\n]+\n?)+)/m);
           if (labelsListMatch) {
             issueLabels = labelsListMatch[1].split('\n').filter(l => l.trim()).map(l => l.replace(/^\s*-\s*/, '').trim());
-            console.log(`📌 Extracted labels from template (list syntax): ${issueLabels.join(', ')}`);
+            console.log(`📌 Extracted labels from template (will add after issue creation): ${issueLabels.join(', ')}`);
           } else {
             console.warn(`⚠️  No labels found in template. Searching in content...`);
             console.warn(`⚠️  Template content preview: ${selectedTemplate.content.substring(0, 500)}`);
@@ -441,7 +447,7 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
           }
         }
       } else {
-        console.log(`📌 Using provided labels: ${issueLabels.join(', ')}`);
+        console.log(`📌 Using provided labels (will add after issue creation): ${issueLabels.join(', ')}`);
       }
       
       if (!issueAssignees) {
@@ -481,18 +487,13 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
   // GitHub API endpoint
   const url = `https://api.github.com/repos/${owner}/${repo}/issues`;
 
-  // Prepare request body (without labels - we'll add them separately via API)
+  // Prepare request body
+  // Note: Labels can only be added AFTER issue creation using the labels endpoint
+  // See: PUT /repos/{owner}/{repo}/issues/{issue_number}/labels
   const requestBody: any = {
     title,
     body: issueBody,
   };
-
-  // Note: Labels will be added after issue creation using the labels API endpoint
-  if (issueLabels && issueLabels.length > 0) {
-    console.log(`🏷️  Will add labels after issue creation: ${issueLabels.join(', ')}`);
-  } else {
-    console.warn(`⚠️  No labels to add to issue. issueLabels value:`, issueLabels);
-  }
 
   if (issueAssignees && issueAssignees.length > 0) {
     requestBody.assignees = issueAssignees;
@@ -513,6 +514,15 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
     headers["Authorization"] = `token ${token}`;
   }
 
+  // Debug mode: show request details
+  if (debugMode) {
+    console.log(`\n🔍 DEBUG MODE - Request Details:`);
+    console.log(`   URL: ${url}`);
+    console.log(`   Method: POST`);
+    console.log(`   Headers:`, JSON.stringify(headers, null, 2).replace(/token [^\s"]+/g, 'token [REDACTED]'));
+    console.log(`   Request Body:`, JSON.stringify(requestBody, null, 2));
+  }
+
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -528,22 +538,73 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
     }
 
     const issue = await response.json() as any;
+    
+    // Debug mode: show full response
+    if (debugMode) {
+      console.log(`\n🔍 DEBUG MODE - Response Details:`);
+      console.log(`   Status: ${response.status} ${response.statusText}`);
+      console.log(`   Response Headers:`, Object.fromEntries(response.headers.entries()));
+      console.log(`   Issue Response:`, JSON.stringify(issue, null, 2));
+    }
+    
     console.log(`✅ Successfully created issue #${issue.number}`);
     console.log(`   Title: ${issue.title}`);
     console.log(`   URL: ${issue.html_url}`);
     
-    // Add labels after issue creation using the labels API endpoint
+    // Add labels after issue creation using PUT /repos/{owner}/{repo}/issues/{issue_number}/labels
+    // This endpoint requires write permission for the repository
     if (issueLabels && issueLabels.length > 0) {
+      console.log(`🏷️  Adding labels to issue: ${issueLabels.join(', ')}`);
+      
+      // Debug: Verify if labels exist in repository
+      if (debugMode && token) {
+        console.log(`\n🔍 DEBUG: Checking if labels exist in repository...`);
+        for (const label of issueLabels) {
+          try {
+            const labelUrl = `https://api.github.com/repos/${owner}/${repo}/labels/${encodeURIComponent(label)}`;
+            const labelResponse = await fetch(labelUrl, {
+              headers: {
+                "Accept": "application/vnd.github.v3+json",
+                "Authorization": `token ${token}`,
+                "User-Agent": "Safe-Deployments-Scripts",
+              },
+            });
+            if (labelResponse.ok) {
+              const labelData = await labelResponse.json() as { color: string; name: string };
+              console.log(`   ✅ Label "${label}" exists: ${labelData.color}`);
+            } else {
+              console.log(`   ❌ Label "${label}" does NOT exist (${labelResponse.status})`);
+            }
+          } catch (err: any) {
+            console.log(`   ⚠️  Could not check label "${label}": ${err.message}`);
+          }
+        }
+      }
+      
       try {
+        // Use PUT to set labels (replaces all existing labels)
+        // Use POST to add labels (adds to existing labels)
+        // We use PUT to set exactly the labels we want
         const labelsUrl = `https://api.github.com/repos/${owner}/${repo}/issues/${issue.number}/labels`;
+        const labelsHeaders: Record<string, string> = {
+          "Accept": "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "User-Agent": "Safe-Deployments-Scripts",
+        };
+        if (token) {
+          labelsHeaders["Authorization"] = `token ${token}`;
+        }
+        
+        if (debugMode) {
+          console.log(`\n🔍 DEBUG: Labels API Request:`);
+          console.log(`   URL: ${labelsUrl}`);
+          console.log(`   Method: PUT`);
+          console.log(`   Body: ${JSON.stringify({ labels: issueLabels })}`);
+        }
+        
         const labelsResponse = await fetch(labelsUrl, {
-          method: "POST",
-          headers: {
-            "Accept": "application/vnd.github+json",
-            "Authorization": token ? `token ${token}` : "",
-            "Content-Type": "application/json",
-            "User-Agent": "Safe-Deployments-Scripts",
-          },
+          method: "PUT",
+          headers: labelsHeaders,
           body: JSON.stringify({
             labels: issueLabels
           }),
@@ -556,10 +617,16 @@ export async function createGitHubIssue(options: CreateIssueOptions): Promise<an
           const errorText = await labelsResponse.text();
           console.warn(`⚠️  Failed to add labels: ${labelsResponse.status} ${labelsResponse.statusText}`);
           console.warn(`   Error: ${errorText}`);
+          console.warn(`   Note: Adding labels requires write permission for the repository.`);
+          if (debugMode) {
+            console.warn(`   DEBUG: Full error response: ${errorText}`);
+          }
         }
       } catch (labelError: any) {
         console.warn(`⚠️  Error adding labels: ${labelError.message}`);
       }
+    } else {
+      console.log(`🏷️  No labels to add`);
     }
     
     return issue;
@@ -594,6 +661,7 @@ async function main() {
     console.error('  tsx create-github-issue.ts safe-global safe-eth-py --list-templates');
     console.error("\nEnvironment variables:");
     console.error("  GITHUB_TOKEN - GitHub personal access token (required for creating issues, optional for listing templates)");
+    console.error("  DEBUG - Set to 'true' or '1' to enable debug mode (shows request/response details and label verification)");
     process.exit(1);
   }
 

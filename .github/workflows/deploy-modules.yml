@@ -1,0 +1,276 @@
+name: Deploy Safe Modules
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain_id:
+        description: 'Chain ID (e.g., 11155111 for Sepolia)'
+        required: true
+        type: string
+      custom_rpc_url:
+        description: 'Custom RPC URL for the network'
+        required: true
+        type: string
+      block_explorer_url:
+        description: 'Block explorer URL (optional)'
+        required: false
+        type: string
+      network_name:
+        description: 'Network name (for logging purposes)'
+        required: false
+        type: string
+        default: 'custom'
+
+jobs:
+  deploy:
+    name: Deploy Safe Modules
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt
+          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Deploy Safe Modules
+        id: deploy
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          CHAIN_ID: ${{ github.event.inputs.chain_id }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          if [ -z "$CHAIN_ID" ]; then
+            echo "::error::CHAIN_ID is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying Safe modules (social-recovery and allowance)..."
+          echo "Chain ID: $CHAIN_ID"
+          echo "Network: ${NETWORK:-custom}"
+          echo "RPC URL: ${CUSTOM_RPC_URL:0:30}..." # Mask for security
+          
+          if [ -n "$BLOCK_EXPLORER_URL" ]; then
+            echo "Block Explorer: $BLOCK_EXPLORER_URL"
+          fi
+          
+          pnpm exec tsx scripts/deploy-modules.ts --network "${NETWORK:-custom}"
+
+      - name: Display deployment summary
+        if: always()
+        run: |
+          echo "## Safe Modules Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chain ID**: ${{ github.event.inputs.chain_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network**: ${{ github.event.inputs.network_name || 'custom' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ github.event.inputs.block_explorer_url }}" ]; then
+            echo "- **Block Explorer**: ${{ github.event.inputs.block_explorer_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to read from JSON summary file first (most reliable)
+          SUMMARY_FILE=$(find deployments -name "github-actions-modules-summary-*-latest.json" -type f | head -1)
+          
+          if [ -n "$SUMMARY_FILE" ] && [ -f "$SUMMARY_FILE" ] && command -v jq &> /dev/null; then
+            echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Read from JSON file
+            TOTAL=$(jq -r '.totalContracts // 0' "$SUMMARY_FILE")
+            SUCCESS=$(jq -r '.successful // 0' "$SUMMARY_FILE")
+            FAILED=$(jq -r '.failed // 0' "$SUMMARY_FILE")
+            
+            if [ "$TOTAL" -gt 0 ]; then
+              echo "- **Total Modules**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+              echo "- **Successful**: $SUCCESS" >> $GITHUB_STEP_SUMMARY
+              echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Read ETH balance from GitHub output if available
+            if [ -f "$GITHUB_OUTPUT" ] && grep -q "eth_balance_eth" "$GITHUB_OUTPUT"; then
+              BALANCE=$(grep "eth_balance_eth" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+              echo "- **ETH Balance**: \`$BALANCE ETH\`" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # List all deployed modules from JSON
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Deployed Modules" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Extract module details from JSON
+            jq -r '.deployments[] | "\(.contractName)|\(.success)|\(.txHash // "N/A")|\(.contractAddress // .expectedAddress // "N/A")|\(.blockNumber // "N/A")|\(.error // "")"' "$SUMMARY_FILE" | while IFS='|' read -r NAME SUCCESS TX_HASH ADDRESS BLOCK ERROR; do
+              if [ "$SUCCESS" = "true" ]; then
+                STATUS="✅"
+                if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
+                  STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
+                fi
+                if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
+                  STATUS="$STATUS [Block: $BLOCK]"
+                fi
+                if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
+                  STATUS="$STATUS [Address: \`$ADDRESS\`]"
+                fi
+              else
+                STATUS="❌ Failed"
+                if [ -n "$ERROR" ] && [ "$ERROR" != "null" ]; then
+                  STATUS="$STATUS - $ERROR"
+                fi
+              fi
+              
+              echo "- **$NAME**: $STATUS" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            # Fallback: Read from GitHub output if JSON file not found
+            if [ -f "$GITHUB_OUTPUT" ]; then
+              echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              if grep -q "eth_balance_eth" "$GITHUB_OUTPUT"; then
+                BALANCE=$(grep "eth_balance_eth" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **ETH Balance**: \`$BALANCE ETH\`" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if grep -q "deployment_successful_count" "$GITHUB_OUTPUT"; then
+                SUCCESS=$(grep "deployment_successful_count" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                FAILED=$(grep "deployment_failed_count" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **Successful**: $SUCCESS" >> $GITHUB_STEP_SUMMARY
+                echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              # List all deployed modules
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Deployed Modules" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              MODULE_COUNT=1
+              while grep -q "module_${MODULE_COUNT}_name" "$GITHUB_OUTPUT"; do
+                NAME=$(grep "module_${MODULE_COUNT}_name" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                SUCCESS=$(grep "module_${MODULE_COUNT}_success" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                
+                if [ "$SUCCESS" = "true" ]; then
+                  STATUS="✅"
+                  if grep -q "module_${MODULE_COUNT}_tx_hash" "$GITHUB_OUTPUT"; then
+                    TX_HASH=$(grep "module_${MODULE_COUNT}_tx_hash" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$TX_HASH" ] && [ "$TX_HASH" != "null" ]; then
+                      STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
+                    fi
+                  fi
+                  if grep -q "module_${MODULE_COUNT}_block_number" "$GITHUB_OUTPUT"; then
+                    BLOCK=$(grep "module_${MODULE_COUNT}_block_number" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$BLOCK" ] && [ "$BLOCK" != "null" ]; then
+                      STATUS="$STATUS [Block: $BLOCK]"
+                    fi
+                  fi
+                  if grep -q "module_${MODULE_COUNT}_address" "$GITHUB_OUTPUT"; then
+                    ADDRESS=$(grep "module_${MODULE_COUNT}_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$ADDRESS" ] && [ "$ADDRESS" != "null" ]; then
+                      STATUS="$STATUS [Address: \`$ADDRESS\`]"
+                    fi
+                  fi
+                else
+                  STATUS="❌ Failed"
+                  if grep -q "module_${MODULE_COUNT}_error" "$GITHUB_OUTPUT"; then
+                    ERROR=$(grep "module_${MODULE_COUNT}_error" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$ERROR" ] && [ "$ERROR" != "null" ]; then
+                      STATUS="$STATUS - $ERROR"
+                    fi
+                  fi
+                fi
+                
+                echo "- **$NAME**: $STATUS" >> $GITHUB_STEP_SUMMARY
+                MODULE_COUNT=$((MODULE_COUNT + 1))
+              done
+            else
+              echo "⚠ No deployment results found" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-results-modules
+          path: |
+            deployments/
+          retention-days: 30
+
+      - name: Create deployment summary for other workflows
+        if: always()
+        run: |
+          # Find the latest GitHub Actions summary file
+          if [ -d "deployments" ]; then
+            LATEST_SUMMARY=$(find deployments -name "github-actions-modules-summary-*-latest.json" | head -1)
+            if [ -n "$LATEST_SUMMARY" ]; then
+              echo "Found summary file: $LATEST_SUMMARY"
+              # Copy to a well-known location for other workflows
+              cp "$LATEST_SUMMARY" modules-deployment-summary.json
+              echo "Created modules-deployment-summary.json for other workflows"
+              
+              # Output key values for easy access
+              if command -v jq &> /dev/null; then
+                echo "modules_deployment_summary_file=modules-deployment-summary.json" >> $GITHUB_OUTPUT
+                echo "total_modules=$(jq -r '.totalContracts' modules-deployment-summary.json)" >> $GITHUB_OUTPUT
+                echo "successful_modules=$(jq -r '.successful' modules-deployment-summary.json)" >> $GITHUB_OUTPUT
+                echo "failed_modules=$(jq -r '.failed' modules-deployment-summary.json)" >> $GITHUB_OUTPUT
+                echo "network=$(jq -r '.network' modules-deployment-summary.json)" >> $GITHUB_OUTPUT
+                echo "chain_id=$(jq -r '.chainId' modules-deployment-summary.json)" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "Warning: No deployment summary file found"
+            fi
+          fi
+
+      - name: Upload deployment summary for other workflows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-summary-modules
+          path: |
+            modules-deployment-summary.json
+            deployments/github-actions-modules-summary-*-latest.json
+          retention-days: 90
+          if-no-files-found: warn
+

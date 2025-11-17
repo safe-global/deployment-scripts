@@ -1,0 +1,283 @@
+name: Update Safe Deployments Registry
+
+# This workflow automatically triggers the update-registry workflow in safe-deployments-1
+# repository after a successful deployment in this repository.
+#
+# Required Secret:
+#   SAFE_DEPLOYMENTS_1_TOKEN - A GitHub Personal Access Token (PAT) with workflow permissions
+#   to trigger workflows in the safe-global/safe-deployments repository.
+#
+# Setup:
+#   1. Create a GitHub PAT with 'workflow' scope
+#   2. Add it as a secret named SAFE_DEPLOYMENTS_1_TOKEN in this repository's settings
+#   3. The workflow will automatically run after successful deployments
+
+on:
+  workflow_run:
+    workflows:
+      - "Deploy Safe 1.3.0 Canonical Contracts"
+      - "Deploy Safe 1.4.1 Contracts"
+      - "Deploy Safe 1.5.0 Contracts"
+      - "Deploy Safe Modules"
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+  workflows: write
+
+jobs:
+  update-registry:
+    name: Update Safe Deployments Registry
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt
+          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Determine workflow type and artifact name
+        id: workflow-info
+        run: |
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
+          
+          # Determine artifact name based on workflow
+          # Note: Artifact names must match those created in the deployment workflows
+          case "$WORKFLOW_NAME" in
+            "Deploy Safe 1.3.0 Canonical Contracts")
+              echo "artifact_name=deployment-summary" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=v1.3.0-canonical" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+            "Deploy Safe 1.4.1 Contracts")
+              echo "artifact_name=deployment-summary-1.4.1" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=v1.4.1" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+            "Deploy Safe 1.5.0 Contracts")
+              echo "artifact_name=deployment-summary-1.5.0" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=v1.5.0" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+            "Deploy Safe Modules")
+              echo "artifact_name=deployment-summary-modules" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-modules-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=modules" >> $GITHUB_OUTPUT
+              echo "is_module=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "artifact_name=deployment-summary" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=unknown" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Download deployment summary artifact
+        id: download-artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.workflow-info.outputs.artifact_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: ./deployment-artifacts
+          if-no-files-found: warn
+
+      - name: Extract deployment information
+        id: extract-info
+        run: |
+          # Find the summary file
+          SUMMARY_FILE=$(find ./deployment-artifacts -name "${{ steps.workflow-info.outputs.summary_file_pattern }}" -type f | head -1)
+          
+          if [ -z "$SUMMARY_FILE" ]; then
+            # Try alternative locations
+            SUMMARY_FILE=$(find ./deployment-artifacts -name "*-latest.json" -type f | head -1)
+          fi
+          
+          if [ -z "$SUMMARY_FILE" ] || [ ! -f "$SUMMARY_FILE" ]; then
+            echo "::error::Deployment summary file not found"
+            echo "Searched for: ${{ steps.workflow-info.outputs.summary_file_pattern }}"
+            echo "Files in deployment-artifacts:"
+            find ./deployment-artifacts -type f || echo "No files found"
+            exit 1
+          fi
+          
+          echo "Found summary file: $SUMMARY_FILE"
+          echo "summary_file=$SUMMARY_FILE" >> $GITHUB_OUTPUT
+          
+          # Extract chain ID
+          CHAIN_ID=$(jq -r '.chainId // empty' "$SUMMARY_FILE")
+          if [ -z "$CHAIN_ID" ] || [ "$CHAIN_ID" = "null" ]; then
+            echo "::error::Chain ID not found in deployment summary"
+            exit 1
+          fi
+          
+          echo "chain_id=$CHAIN_ID" >> $GITHUB_OUTPUT
+          
+          # Extract network name
+          NETWORK=$(jq -r '.network // "unknown"' "$SUMMARY_FILE")
+          echo "network=$NETWORK" >> $GITHUB_OUTPUT
+          
+          # Extract deployment stats
+          TOTAL=$(jq -r '.totalContracts // 0' "$SUMMARY_FILE")
+          SUCCESSFUL=$(jq -r '.successful // 0' "$SUMMARY_FILE")
+          FAILED=$(jq -r '.failed // 0' "$SUMMARY_FILE")
+          
+          echo "total_contracts=$TOTAL" >> $GITHUB_OUTPUT
+          echo "successful=$SUCCESSFUL" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          
+          # Display summary
+          echo "## Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow**: ${{ github.event.workflow_run.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.workflow-info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network**: $NETWORK" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chain ID**: $CHAIN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Contracts**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Successful**: $SUCCESSFUL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+
+      - name: Skip if modules deployment
+        if: steps.workflow-info.outputs.is_module == 'true'
+        run: |
+          echo "::notice::Modules deployment detected. The update-registry workflow in safe-deployments-1 only supports Safe Smart Account versions (v1.3.0-canonical, v1.3.0-eip155, v1.4.1, v1.5.0), not modules."
+          echo "Skipping registry update for modules deployment."
+          exit 0
+
+      - name: Skip if version not supported
+        if: steps.workflow-info.outputs.version == 'unknown'
+        run: |
+          echo "::warning::Unknown version detected. Skipping registry update."
+          exit 0
+
+      - name: Trigger update-registry workflow in safe-deployments-1
+        if: steps.workflow-info.outputs.is_module == 'false' && steps.workflow-info.outputs.version != 'unknown'
+        env:
+          GITHUB_TOKEN: ${{ secrets.SAFE_DEPLOYMENTS_1_TOKEN }}
+        run: |
+          # Use GitHub API to trigger the workflow_dispatch event
+          REPO="safe-global/safe-deployments"
+          WORKFLOW_FILE="update-registry.yml"
+          
+          echo "Triggering workflow: $WORKFLOW_FILE in $REPO"
+          echo "Version: ${{ steps.workflow-info.outputs.version }}"
+          echo "Chain ID: ${{ steps.extract-info.outputs.chain_id }}"
+          
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "::error::SAFE_DEPLOYMENTS_1_TOKEN secret is not set. Please configure a GitHub Personal Access Token with workflow permissions."
+            exit 1
+          fi
+          
+          # Get workflow ID
+          WORKFLOW_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW_FILE")
+          
+          HTTP_CODE=$(echo "$WORKFLOW_RESPONSE" | tail -n1)
+          WORKFLOW_BODY=$(echo "$WORKFLOW_RESPONSE" | head -n-1)
+          
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Failed to get workflow. HTTP $HTTP_CODE"
+            echo "Response: $WORKFLOW_BODY"
+            exit 1
+          fi
+          
+          WORKFLOW_ID=$(echo "$WORKFLOW_BODY" | jq -r '.id')
+          
+          if [ "$WORKFLOW_ID" = "null" ] || [ -z "$WORKFLOW_ID" ]; then
+            echo "::error::Failed to get workflow ID from response"
+            echo "Response: $WORKFLOW_BODY"
+            exit 1
+          fi
+          
+          echo "Workflow ID: $WORKFLOW_ID"
+          
+          # Get default branch from repository
+          REPO_INFO=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO")
+          
+          DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch // "main"')
+          echo "Default branch: $DEFAULT_BRANCH"
+          
+          # Trigger workflow_dispatch
+          VERSION="${{ steps.workflow-info.outputs.version }}"
+          CHAIN_ID="${{ steps.extract-info.outputs.chain_id }}"
+          
+          DISPATCH_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW_ID/dispatches" \
+            -d "{
+              \"ref\": \"$DEFAULT_BRANCH\",
+              \"inputs\": {
+                \"version\": \"$VERSION\",
+                \"chain_id\": \"$CHAIN_ID\"
+              }
+            }")
+          
+          DISPATCH_HTTP_CODE=$(echo "$DISPATCH_RESPONSE" | tail -n1)
+          DISPATCH_BODY=$(echo "$DISPATCH_RESPONSE" | head -n-1)
+          
+          if [ "$DISPATCH_HTTP_CODE" -eq 204 ]; then
+            echo "::notice::Successfully triggered update-registry workflow in $REPO"
+            echo "Workflow URL: https://github.com/$REPO/actions"
+            echo "workflow_triggered=true" >> $GITHUB_OUTPUT
+            echo "workflow_url=https://github.com/$REPO/actions" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Failed to trigger workflow. HTTP $DISPATCH_HTTP_CODE"
+            echo "Response: $DISPATCH_BODY"
+            exit 1
+          fi
+
+      - name: Display summary
+        if: always()
+        run: |
+          echo "## Update Registry Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.workflow-info.outputs.is_module }}" = "true" ]; then
+            echo "⚠️ **Modules deployment detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The update-registry workflow in safe-deployments-1 only supports Safe Smart Account versions, not modules." >> $GITHUB_STEP_SUMMARY
+            echo "Skipping registry update." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.workflow-info.outputs.version }}" = "unknown" ]; then
+            echo "⚠️ **Unknown version detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Could not determine version from workflow name. Skipping registry update." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Successfully triggered update-registry workflow**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Repository**: safe-global/safe-deployments" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version**: ${{ steps.workflow-info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Chain ID**: ${{ steps.extract-info.outputs.chain_id }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Network**: ${{ steps.extract-info.outputs.network }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the workflow run: https://github.com/safe-global/safe-deployments/actions" >> $GITHUB_STEP_SUMMARY
+          fi
+

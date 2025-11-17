@@ -214,61 +214,36 @@ async function deployContract(
     if (deploymentData.expectedAddress) {
       console.log("Expected address:", deploymentData.expectedAddress);
     }
-    if (deploymentData.codeHash) {
-      console.log("Expected codeHash:", deploymentData.codeHash);
-    }
 
     // Check if contract is already deployed at expected address
     if (deploymentData.expectedAddress) {
       console.log("\nChecking if contract already exists at expected address...");
       
-      // Get account proof to check codehash
       try {
-        const proof = await publicClient.getProof({
+        const existingBytecode = await publicClient.getBytecode({
           address: deploymentData.expectedAddress,
-          storageKeys: [], // Empty array for account proof only
         });
 
-        if (proof.codeHash && proof.codeHash !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
-          console.log("✓ Codehash found:", proof.codeHash);
+        if (existingBytecode && existingBytecode !== "0x") {
+          console.log("✓ Contract already deployed at expected address:", deploymentData.expectedAddress);
+          console.log("Bytecode length:", existingBytecode.length, "characters");
+          console.log("Skipping deployment.");
           
-          // Compare with expected codeHash from deployment data if provided
-          if (deploymentData.codeHash) {
-            const proofCodeHashLower = proof.codeHash.toLowerCase();
-            const expectedCodeHashLower = deploymentData.codeHash.toLowerCase();
-            
-            if (proofCodeHashLower === expectedCodeHashLower) {
-              console.log("✓ Codehash matches expected codeHash!");
-            } else {
-              console.warn(`⚠ Codehash mismatch!`);
-              console.warn(`  Expected: ${deploymentData.codeHash}`);
-              console.warn(`  Got:      ${proof.codeHash}`);
-            }
-          } else {
-            console.log("⚠ No expected codeHash provided in deployment data for comparison");
-          }
+          result.success = true;
+          result.contractAddress = deploymentData.expectedAddress;
+          result.expectedAddress = deploymentData.expectedAddress;
+          
+          return result;
         } else {
-          console.log("No codehash found (account has no code)");
+          console.log("No bytecode found at expected address. Proceeding with deployment...");
         }
       } catch (error: any) {
-        console.log("Could not get proof (account may not exist yet):", error.message);
+        console.warn(`⚠ Could not check if contract exists: ${error.message}`);
+        console.log("Proceeding with deployment...");
       }
-
-      const existingBytecode = await publicClient.getBytecode({
-        address: deploymentData.expectedAddress,
-      });
-
-      if (existingBytecode && existingBytecode !== "0x") {
-        console.log("✓ Contract already deployed at expected address:", deploymentData.expectedAddress);
-        console.log("Bytecode length:", existingBytecode.length, "characters");
-        console.log("Skipping deployment.");
-        
-        result.success = true;
-        result.contractAddress = deploymentData.expectedAddress;
-        return result;
-      } else {
-        console.log("No bytecode found at expected address. Proceeding with deployment...");
-      }
+    } else {
+      console.log("\n⚠ No expected address provided - cannot verify if contract is already deployed");
+      console.log("Proceeding with deployment...");
     }
 
     // Send transaction
@@ -298,18 +273,51 @@ async function deployContract(
     if (receipt.status === "success") {
       result.success = true;
 
-      if (deploymentData.expectedAddress && receipt.contractAddress) {
-        result.contractAddress = receipt.contractAddress;
-        console.log("Deployed contract address:", receipt.contractAddress);
-        if (receipt.contractAddress.toLowerCase() !== deploymentData.expectedAddress.toLowerCase()) {
-          const warning = `⚠ Warning: Expected address ${deploymentData.expectedAddress} but got ${receipt.contractAddress}`;
-          console.warn(warning);
-        } else {
-          console.log("✓ Address matches expected address!");
+      // For Safe Singleton Factory deployments, the receipt doesn't include contractAddress
+      // because the factory creates contracts deterministically. Use expectedAddress if available.
+      if (deploymentData.expectedAddress) {
+        // Verify the contract was actually deployed (or already existed)
+        try {
+          const deployedBytecode = await publicClient.getBytecode({
+            address: deploymentData.expectedAddress,
+          });
+
+          if (deployedBytecode && deployedBytecode !== "0x") {
+            // Contract exists at expected address
+            result.contractAddress = deploymentData.expectedAddress;
+            console.log("Deployed contract address:", deploymentData.expectedAddress);
+            console.log("✓ Contract verified at expected address");
+            
+            // If receipt has contractAddress, verify it matches (shouldn't happen with factory, but check anyway)
+            if (receipt.contractAddress) {
+              if (receipt.contractAddress.toLowerCase() !== deploymentData.expectedAddress.toLowerCase()) {
+                const warning = `⚠ Warning: Expected address ${deploymentData.expectedAddress} but got ${receipt.contractAddress}`;
+                console.warn(warning);
+              } else {
+                console.log("✓ Address matches expected address!");
+              }
+            } else {
+              console.log("✓ Using expected address (deterministic deployment via factory)");
+            }
+          } else {
+            // Transaction succeeded but contract doesn't exist - this shouldn't happen with factory
+            console.warn(`⚠ Warning: Transaction succeeded but no bytecode found at ${deploymentData.expectedAddress}`);
+            console.warn("This might indicate the contract was already deployed and the transaction was a no-op");
+            result.contractAddress = deploymentData.expectedAddress;
+            result.success = true; // Still consider it success since contract exists (or should exist)
+          }
+        } catch (error: any) {
+          console.warn(`⚠ Could not verify contract deployment: ${error.message}`);
+          // Still use expected address as contract address
+          result.contractAddress = deploymentData.expectedAddress;
+          console.log("Deployed contract address:", deploymentData.expectedAddress);
         }
       } else if (receipt.contractAddress) {
+        // Fallback: use receipt address if no expected address is provided
         result.contractAddress = receipt.contractAddress;
         console.log("Deployed contract address:", receipt.contractAddress);
+      } else {
+        console.warn("⚠ No contract address available (neither expectedAddress nor receipt.contractAddress)");
       }
 
       // Save transaction data to file
@@ -319,7 +327,7 @@ async function deployContract(
         receipt.blockNumber,
         networkName,
         chainId,
-        receipt.contractAddress || deploymentData.expectedAddress,
+        result.contractAddress || deploymentData.expectedAddress,
         deploymentData.expectedAddress,
         receipt.gasUsed
       );

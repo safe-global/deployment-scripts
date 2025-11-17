@@ -106,71 +106,135 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Read deployment results from GitHub output if available
-          if [ -f "$GITHUB_OUTPUT" ]; then
+          # Try to read from JSON summary file first (most reliable)
+          SUMMARY_FILE=$(find deployments -name "github-actions-summary-*-latest.json" -type f | head -1)
+          
+          if [ -n "$SUMMARY_FILE" ] && [ -f "$SUMMARY_FILE" ] && command -v jq &> /dev/null; then
             echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             
-            if grep -q "deployer_address" "$GITHUB_OUTPUT"; then
-              DEPLOYER=$(grep "deployer_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              echo "- **Deployer Address**: \`$DEPLOYER\`" >> $GITHUB_STEP_SUMMARY
-            fi
+            # Read from JSON file
+            TOTAL=$(jq -r '.totalContracts // 0' "$SUMMARY_FILE")
+            SUCCESS=$(jq -r '.successful // 0' "$SUMMARY_FILE")
+            FAILED=$(jq -r '.failed // 0' "$SUMMARY_FILE")
             
-            if grep -q "eth_balance_eth" "$GITHUB_OUTPUT"; then
-              BALANCE=$(grep "eth_balance_eth" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              echo "- **ETH Balance**: \`$BALANCE ETH\`" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            if grep -q "total_contracts" "$GITHUB_OUTPUT"; then
-              TOTAL=$(grep "total_contracts" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              SUCCESS=$(grep "successful" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              FAILED=$(grep "failed" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+            if [ "$TOTAL" -gt 0 ]; then
               echo "- **Total Contracts**: $TOTAL" >> $GITHUB_STEP_SUMMARY
               echo "- **Successful**: $SUCCESS" >> $GITHUB_STEP_SUMMARY
               echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
             fi
             
-            # List all deployed contracts
+            # Read deployer address and ETH balance from GitHub output if available
+            if [ -f "$GITHUB_OUTPUT" ]; then
+              if grep -q "deployer_address" "$GITHUB_OUTPUT"; then
+                DEPLOYER=$(grep "deployer_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **Deployer Address**: \`$DEPLOYER\`" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if grep -q "eth_balance_eth" "$GITHUB_OUTPUT"; then
+                BALANCE=$(grep "eth_balance_eth" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **ETH Balance**: \`$BALANCE ETH\`" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+            
+            # List all deployed contracts from JSON
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Deployed Contracts" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             
-            CONTRACT_COUNT=1
-            while grep -q "contract_${CONTRACT_COUNT}_name" "$GITHUB_OUTPUT"; do
-              NAME=$(grep "contract_${CONTRACT_COUNT}_name" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              SUCCESS=$(grep "contract_${CONTRACT_COUNT}_success" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-              
+            # Extract contract details from JSON
+            jq -r '.deployments[] | "\(.contractName)|\(.success)|\(.txHash // "N/A")|\(.contractAddress // .expectedAddress // "N/A")|\(.blockNumber // "N/A")|\(.error // "")"' "$SUMMARY_FILE" | while IFS='|' read -r NAME SUCCESS TX_HASH ADDRESS BLOCK ERROR; do
               if [ "$SUCCESS" = "true" ]; then
                 STATUS="✅"
-                if grep -q "contract_${CONTRACT_COUNT}_tx_hash" "$GITHUB_OUTPUT"; then
-                  TX_HASH=$(grep "contract_${CONTRACT_COUNT}_tx_hash" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-                  if [ -n "$TX_HASH" ]; then
-                    STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
-                  fi
+                if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
+                  STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
                 fi
-                if grep -q "contract_${CONTRACT_COUNT}_block_number" "$GITHUB_OUTPUT"; then
-                  BLOCK=$(grep "contract_${CONTRACT_COUNT}_block_number" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-                  if [ -n "$BLOCK" ]; then
-                    STATUS="$STATUS [Block: $BLOCK]"
-                  fi
+                if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
+                  STATUS="$STATUS [Block: $BLOCK]"
                 fi
-                if grep -q "contract_${CONTRACT_COUNT}_address" "$GITHUB_OUTPUT"; then
-                  ADDRESS=$(grep "contract_${CONTRACT_COUNT}_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-                  if [ -n "$ADDRESS" ]; then
-                    STATUS="$STATUS [Address: \`$ADDRESS\`]"
-                  fi
+                if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
+                  STATUS="$STATUS [Address: \`$ADDRESS\`]"
                 fi
               else
-                STATUS="❌"
-                if grep -q "contract_${CONTRACT_COUNT}_error" "$GITHUB_OUTPUT"; then
-                  ERROR=$(grep "contract_${CONTRACT_COUNT}_error" "$GITHUB_OUTPUT" | cut -d'=' -f2)
-                  STATUS="$STATUS Error: $ERROR"
+                STATUS="❌ Failed"
+                if [ -n "$ERROR" ] && [ "$ERROR" != "null" ]; then
+                  STATUS="$STATUS - $ERROR"
                 fi
               fi
               
               echo "- **$NAME**: $STATUS" >> $GITHUB_STEP_SUMMARY
-              CONTRACT_COUNT=$((CONTRACT_COUNT + 1))
             done
+          else
+            # Fallback: Read from GitHub output if JSON file not found
+            if [ -f "$GITHUB_OUTPUT" ]; then
+              echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              if grep -q "deployer_address" "$GITHUB_OUTPUT"; then
+                DEPLOYER=$(grep "deployer_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **Deployer Address**: \`$DEPLOYER\`" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if grep -q "eth_balance_eth" "$GITHUB_OUTPUT"; then
+                BALANCE=$(grep "eth_balance_eth" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **ETH Balance**: \`$BALANCE ETH\`" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if grep -q "total_contracts" "$GITHUB_OUTPUT"; then
+                TOTAL=$(grep "total_contracts" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                SUCCESS=$(grep "successful" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                FAILED=$(grep "failed" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                echo "- **Total Contracts**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+                echo "- **Successful**: $SUCCESS" >> $GITHUB_STEP_SUMMARY
+                echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              # List all deployed contracts
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Deployed Contracts" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              CONTRACT_COUNT=1
+              while grep -q "contract_${CONTRACT_COUNT}_name" "$GITHUB_OUTPUT"; do
+                NAME=$(grep "contract_${CONTRACT_COUNT}_name" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                SUCCESS=$(grep "contract_${CONTRACT_COUNT}_success" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                
+                if [ "$SUCCESS" = "true" ]; then
+                  STATUS="✅"
+                  if grep -q "contract_${CONTRACT_COUNT}_tx_hash" "$GITHUB_OUTPUT"; then
+                    TX_HASH=$(grep "contract_${CONTRACT_COUNT}_tx_hash" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$TX_HASH" ] && [ "$TX_HASH" != "null" ]; then
+                      STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
+                    fi
+                  fi
+                  if grep -q "contract_${CONTRACT_COUNT}_block_number" "$GITHUB_OUTPUT"; then
+                    BLOCK=$(grep "contract_${CONTRACT_COUNT}_block_number" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$BLOCK" ] && [ "$BLOCK" != "null" ]; then
+                      STATUS="$STATUS [Block: $BLOCK]"
+                    fi
+                  fi
+                  if grep -q "contract_${CONTRACT_COUNT}_address" "$GITHUB_OUTPUT"; then
+                    ADDRESS=$(grep "contract_${CONTRACT_COUNT}_address" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$ADDRESS" ] && [ "$ADDRESS" != "null" ]; then
+                      STATUS="$STATUS [Address: \`$ADDRESS\`]"
+                    fi
+                  fi
+                else
+                  STATUS="❌ Failed"
+                  if grep -q "contract_${CONTRACT_COUNT}_error" "$GITHUB_OUTPUT"; then
+                    ERROR=$(grep "contract_${CONTRACT_COUNT}_error" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+                    if [ -n "$ERROR" ] && [ "$ERROR" != "null" ]; then
+                      STATUS="$STATUS - $ERROR"
+                    fi
+                  fi
+                fi
+                
+                echo "- **$NAME**: $STATUS" >> $GITHUB_STEP_SUMMARY
+                CONTRACT_COUNT=$((CONTRACT_COUNT + 1))
+              done
+            else
+              echo "⚠ No deployment results found" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY

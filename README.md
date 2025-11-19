@@ -23,9 +23,9 @@ All deployments use **deterministic deployment** via the [Safe Singleton Factory
 
 - Node.js >= 18.0.0
 - pnpm (recommended) or npm
-- **Gas tokens** sent to the deployer address: `0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`
+- **Gas tokens** sent to the deployer address: `0x38D48FaDa993b749691E93e4E62259c488bCb766`
 
-> ⚠️ **Important**: Before running deployments, ensure the deployer address (`0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`) has sufficient gas tokens (ETH or native token) for the target network. Deployment transactions require gas fees.
+> ⚠️ **Important**: Before running deployments, ensure the deployer address (`0x38D48FaDa993b749691E93e4E62259c488bCb766`) has sufficient gas tokens (ETH or native token) for the target network. Deployment transactions require gas fees.
 
 ## Installation
 
@@ -52,7 +52,7 @@ RPC_URL=https://...  # RPC URL for your network
 ```
 
 4. **Send gas tokens** to the deployer address:
-   - **Deployer Address**: `0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`
+   - **Deployer Address**: `0x38D48FaDa993b749691E93e4E62259c488bCb766`
    - Send native gas tokens (ETH, MATIC, etc.) depending on your target network
    - Ensure sufficient balance for all deployment transactions
 
@@ -96,12 +96,12 @@ pnpm deploy-modules --network <network-name>
 ```bash
 # Set environment variables
 export CUSTOM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
-export PRIVATE_KEY=0x...  # Private key for 0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+export PRIVATE_KEY=0x... #your private key
 export NETWORK=sepolia
 export BLOCK_EXPLORER_URL=https://sepolia.etherscan.io
 
 # Ensure deployer address has ETH for gas
-# Send ETH to: 0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+# Send ETH to your address
 
 # Run deployment
 pnpm deploy-1.5.0 --network sepolia
@@ -112,12 +112,12 @@ pnpm deploy-1.5.0 --network sepolia
 ```bash
 # Set environment variables
 export CUSTOM_RPC_URL=https://your-custom-rpc-url.com
-export PRIVATE_KEY=0x...  # Private key for 0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+export PRIVATE_KEY=0x...  #your private key
 export NETWORK=custom
 export BLOCK_EXPLORER_URL=https://your-explorer.com
 
 # Ensure deployer address has native tokens for gas
-# Send native tokens to: 0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+# Send native tokens to your address
 
 # Run deployment (chain ID will be auto-detected from RPC)
 pnpm deploy-modules --network custom
@@ -178,14 +178,8 @@ This repository includes GitHub Actions workflows for automated deployments via 
 Configure these secrets in your GitHub repository settings (**Settings → Secrets and variables → Actions**):
 
 - **`PRIVATE_KEY`** - The private key of the deployer account (must start with `0x`)
-  - This should be the private key for address: `0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`
+  - This should be the private key for address: `0x38D48FaDa993b749691E93e4E62259c488bCb766`
   - ⚠️ **Never commit this to the repository**
-
-- **RPC URLs** (optional, can use workflow input instead):
-  - `RPC_URL` - Default RPC URL
-  - `SEPOLIA_RPC_URL` - Sepolia testnet RPC
-  - `MAINNET_RPC_URL` - Ethereum mainnet RPC
-  - Or use the `custom_rpc_url` workflow input
 
 > 💡 **Tip**: You can use the `custom_rpc_url` input in workflows instead of setting secrets, which is more flexible for different networks.
 
@@ -193,7 +187,7 @@ Configure these secrets in your GitHub repository settings (**Settings → Secre
 
 **Important**: Ensure the deployer address has sufficient gas tokens before running workflows:
 
-- **Deployer Address**: `0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`
+- **Deployer Address**: `0x38D48FaDa993b749691E93e4E62259c488bCb766`
 - Send native gas tokens (ETH, MATIC, etc.) to this address on your target network
 - Check balance before deployment to avoid failed transactions
 
@@ -239,7 +233,7 @@ The Safe Singleton Factory is available on many networks. To check if a network 
 - **Never commit private keys** to the repository
 - Use GitHub Secrets for all sensitive data in CI/CD
 - Private keys and RPC URLs are automatically masked in logs when running in CI environments
-- The deployer address (`0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408`) should only be used for deployments
+- The deployer address (`0x38D48FaDa993b749691E93e4E62259c488bCb766`) should only be used for deployments
 - Keep the private key secure and rotate if compromised
 
 ## Gas Token Requirements
@@ -248,7 +242,7 @@ The Safe Singleton Factory is available on many networks. To check if a network 
 
 All deployments use the following deployer address:
 ```
-0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+0x38D48FaDa993b749691E93e4E62259c488bCb766
 ```
 
 ### Before Deployment
@@ -270,7 +264,7 @@ All deployments use the following deployer address:
 3. **Verify balance** before running deployments:
    ```bash
    # Check balance on Etherscan or your network's explorer
-   # Address: 0x60Ef2a0FcaA3EC855Be207ADc544F7E4EA005408
+   # Address: 0x38D48FaDa993b749691E93e4E62259c488bCb766
    ```
 
 ## License

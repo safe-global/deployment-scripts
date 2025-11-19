@@ -193,6 +193,214 @@ Configure these secrets in your GitHub repository settings (**Settings → Secre
 
 See `.github/workflows/README.md` for detailed setup instructions.
 
+### Triggering Workflows via GitHub API
+
+You can trigger GitHub Actions workflows programmatically using the GitHub REST API. This is useful for automation, CI/CD integration, or custom tooling.
+
+#### Prerequisites
+
+1. **Create a GitHub Personal Access Token (PAT)**:
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Generate a new token with `repo` scope (or `workflow` scope for GitHub Apps)
+   - Save the token securely
+
+2. **Get the workflow file name**:
+   - The workflow file name is `deploy-all.yml` (or check `.github/workflows/` directory)
+   - The workflow name in the YAML is `Deploy All Contracts`
+
+#### API Endpoint
+
+```
+POST https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches
+```
+
+Where:
+- `{owner}`: Repository owner (e.g., `safe-global`)
+- `{repo}`: Repository name (e.g., `deployment-scripts`)
+- `{workflow_id}`: Either the workflow file name (e.g., `deploy-all.yml`) or the workflow ID (numeric)
+
+#### Basic Example
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/workflows/deploy-all.yml/dispatches \
+  -d '{
+    "ref": "main",
+    "inputs": {
+      "custom_rpc_url": "https://your-rpc-url.com",
+      "network_name": "custom-network",
+      "deploy_targets": "1.5.0"
+    }
+  }'
+```
+
+#### Complete Example: Deploy All Contracts
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/workflows/deploy-all.yml/dispatches \
+  -d '{
+    "ref": "main",
+    "inputs": {
+      "custom_rpc_url": "https://sepolia.infura.io/v3/YOUR_KEY",
+      "block_explorer_url": "https://sepolia.etherscan.io",
+      "network_name": "sepolia",
+      "deploy_targets": "all",
+      "erc20_mint_amount": "1000",
+      "erc721_token_id": "1"
+    }
+  }'
+```
+
+#### Example: Deploy Only Safe 1.5.0
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/workflows/deploy-all.yml/dispatches \
+  -d '{
+    "ref": "main",
+    "inputs": {
+      "custom_rpc_url": "https://your-rpc-url.com",
+      "network_name": "custom",
+      "deploy_targets": "1.5.0"
+    }
+  }'
+```
+
+#### Example: Deploy Multiple Targets
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/workflows/deploy-all.yml/dispatches \
+  -d '{
+    "ref": "main",
+    "inputs": {
+      "custom_rpc_url": "https://your-rpc-url.com",
+      "network_name": "custom",
+      "deploy_targets": "1.5.0,modules,erc20,erc721",
+      "erc20_mint_amount": "5000",
+      "erc721_token_id": "42"
+    }
+  }'
+```
+
+#### Example: Deploy Only Token Contracts
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/workflows/deploy-all.yml/dispatches \
+  -d '{
+    "ref": "main",
+    "inputs": {
+      "custom_rpc_url": "https://your-rpc-url.com",
+      "network_name": "custom",
+      "deploy_targets": "erc20,erc721",
+      "erc20_mint_amount": "5000",
+      "erc721_token_id": "42"
+    }
+  }'
+```
+
+#### Using GitHub CLI
+
+Alternatively, you can use the GitHub CLI (`gh`):
+
+```bash
+gh workflow run deploy-all.yml \
+  --ref main \
+  -f custom_rpc_url=https://your-rpc-url.com \
+  -f network_name=custom \
+  -f deploy_targets=1.5.0,modules
+```
+
+#### Input Parameters Reference
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `custom_rpc_url` | string | ✅ Yes | - | RPC URL for the network |
+| `block_explorer_url` | string | ❌ No | - | Block explorer URL (optional) |
+| `network_name` | string | ❌ No | `custom` | Network name for logging |
+| `deploy_targets` | string | ❌ No | `''` | Comma-separated list of targets to deploy. Options: `1.3.0`, `1.4.1`, `1.5.0`, `modules`, `erc20`, `erc721`, or `all` |
+| `erc20_mint_amount` | string | ❌ No | `1000` | Amount of ERC20 tokens to mint |
+| `erc721_token_id` | string | ❌ No | `1` | Token ID for ERC721 NFT |
+
+**Deploy Targets Format:**
+- Use `all` to deploy everything
+- Use comma-separated values: `1.5.0,modules,erc20`
+- Available options: `1.3.0`, `1.4.1`, `1.5.0`, `modules`, `erc20`, `erc721`
+
+#### Response
+
+On success, the API returns `204 No Content`. You can check the workflow run status via:
+
+```bash
+# List recent workflow runs
+curl -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/runs
+
+# Get specific workflow run details
+curl -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/safe-global/deployment-scripts/actions/runs/{run_id}
+```
+
+#### Error Handling
+
+Common errors:
+
+- **401 Unauthorized**: Invalid or expired token
+- **404 Not Found**: Incorrect repository or workflow name
+- **422 Unprocessable Entity**: Invalid input parameters or missing required fields
+
+#### Security Best Practices
+
+1. **Store tokens securely**: Use environment variables or secret management systems
+2. **Use minimal scopes**: Only grant necessary permissions to tokens
+3. **Rotate tokens regularly**: Update tokens periodically
+4. **Never commit tokens**: Keep tokens out of version control
+
+#### Example: Using Environment Variables
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+GITHUB_TOKEN="${GITHUB_TOKEN}"
+OWNER="safe-global"
+REPO="deployment-scripts"
+WORKFLOW="deploy-all.yml"
+RPC_URL="${1:-https://your-rpc-url.com}"
+NETWORK="${2:-custom}"
+
+curl -X POST \
+  -H "Accept: application/vnd.github.v3+json" \
+  -H "Authorization: token ${GITHUB_TOKEN}" \
+  "https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/dispatches" \
+  -d "{
+    \"ref\": \"main\",
+    \"inputs\": {
+      \"custom_rpc_url\": \"${RPC_URL}\",
+      \"network_name\": \"${NETWORK}\",
+      \"deploy_targets\": \"1.5.0,modules\"
+    }
+  }"
+```
+
+Usage:
+```bash
+export GITHUB_TOKEN=your_token_here
+./deploy.sh https://sepolia.infura.io/v3/YOUR_KEY sepolia
+```
+
 ## Project Structure
 
 ```

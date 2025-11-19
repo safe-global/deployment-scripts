@@ -16,36 +16,11 @@ on:
         required: false
         type: string
         default: 'custom'
-      deploy_1_3_0:
-        description: 'Deploy Safe 1.3.0 Canonical contracts'
+      deploy_targets:
+        description: 'Comma-separated list of targets to deploy (e.g., "1.5.0,modules,erc20,erc721" or "all"). Options: 1.3.0, 1.4.1, 1.5.0, modules, erc20, erc721, all'
         required: false
-        type: boolean
-        default: false
-      deploy_1_4_1:
-        description: 'Deploy Safe 1.4.1 contracts'
-        required: false
-        type: boolean
-        default: false
-      deploy_1_5_0:
-        description: 'Deploy Safe 1.5.0 contracts'
-        required: false
-        type: boolean
-        default: false
-      deploy_modules:
-        description: 'Deploy Safe Modules contracts'
-        required: false
-        type: boolean
-        default: false
-      deploy_erc20:
-        description: 'Deploy ERC20 token contract'
-        required: false
-        type: boolean
-        default: false
-      deploy_erc721:
-        description: 'Deploy ERC721 NFT contract'
-        required: false
-        type: boolean
-        default: false
+        type: string
+        default: ''
       erc20_mint_amount:
         description: 'Amount of ERC20 tokens to mint (default: 1000)'
         required: false
@@ -93,8 +68,37 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends jq
 
+      - name: Parse deployment targets
+        id: parse_targets
+        run: |
+          DEPLOY_TARGETS="${{ github.event.inputs.deploy_targets }}"
+          DEPLOY_TARGETS=$(echo "$DEPLOY_TARGETS" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          
+          if [ -z "$DEPLOY_TARGETS" ] || [ "$DEPLOY_TARGETS" = "" ]; then
+            echo "No deployment targets specified"
+            exit 0
+          fi
+          
+          # Check for "all" keyword
+          if echo "$DEPLOY_TARGETS" | grep -q "all"; then
+            echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT
+            echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT
+            echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT
+            echo "deploy_modules=true" >> $GITHUB_OUTPUT
+            echo "deploy_erc20=true" >> $GITHUB_OUTPUT
+            echo "deploy_erc721=true" >> $GITHUB_OUTPUT
+          else
+            # Check individual targets
+            echo "$DEPLOY_TARGETS" | grep -q "1.3.0" && echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -q "1.4.1" && echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT || echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -q "1.5.0" && echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -q "modules" && echo "deploy_modules=true" >> $GITHUB_OUTPUT || echo "deploy_modules=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -q "erc20" && echo "deploy_erc20=true" >> $GITHUB_OUTPUT || echo "deploy_erc20=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -q "erc721" && echo "deploy_erc721=true" >> $GITHUB_OUTPUT || echo "deploy_erc721=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy Safe 1.3.0 Canonical
-        if: ${{ github.event.inputs.deploy_1_3_0 == 'true' }}
+        if: steps.parse_targets.outputs.deploy_1_3_0 == 'true'
         id: deploy_1_3_0
         continue-on-error: true
         env:
@@ -124,7 +128,7 @@ jobs:
           echo "deploy_1_3_0_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy Safe 1.4.1
-        if: ${{ github.event.inputs.deploy_1_4_1 == 'true' }}
+        if: steps.parse_targets.outputs.deploy_1_4_1 == 'true'
         id: deploy_1_4_1
         continue-on-error: true
         env:
@@ -154,7 +158,7 @@ jobs:
           echo "deploy_1_4_1_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy Safe 1.5.0
-        if: ${{ github.event.inputs.deploy_1_5_0 == 'true' }}
+        if: steps.parse_targets.outputs.deploy_1_5_0 == 'true'
         id: deploy_1_5_0
         continue-on-error: true
         env:
@@ -184,7 +188,7 @@ jobs:
           echo "deploy_1_5_0_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy Safe Modules
-        if: ${{ github.event.inputs.deploy_modules == 'true' }}
+        if: steps.parse_targets.outputs.deploy_modules == 'true'
         id: deploy_modules
         continue-on-error: true
         env:
@@ -214,7 +218,7 @@ jobs:
           echo "deploy_modules_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy ERC20 Token
-        if: ${{ github.event.inputs.deploy_erc20 == 'true' }}
+        if: steps.parse_targets.outputs.deploy_erc20 == 'true'
         id: deploy_erc20
         continue-on-error: true
         env:
@@ -246,7 +250,7 @@ jobs:
           echo "deploy_erc20_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy ERC721 NFT
-        if: ${{ github.event.inputs.deploy_erc721 == 'true' }}
+        if: steps.parse_targets.outputs.deploy_erc721 == 'true'
         id: deploy_erc721
         continue-on-error: true
         env:
@@ -292,32 +296,32 @@ jobs:
           DEPLOYMENTS=()
           STATUSES=()
           
-          if [ "${{ github.event.inputs.deploy_1_3_0 }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0 }}" == "true" ]; then
             DEPLOYMENTS+=("Safe 1.3.0 Canonical")
             STATUSES+=("${{ steps.deploy_1_3_0.outcome }}")
           fi
           
-          if [ "${{ github.event.inputs.deploy_1_4_1 }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_1_4_1 }}" == "true" ]; then
             DEPLOYMENTS+=("Safe 1.4.1")
             STATUSES+=("${{ steps.deploy_1_4_1.outcome }}")
           fi
           
-          if [ "${{ github.event.inputs.deploy_1_5_0 }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_1_5_0 }}" == "true" ]; then
             DEPLOYMENTS+=("Safe 1.5.0")
             STATUSES+=("${{ steps.deploy_1_5_0.outcome }}")
           fi
           
-          if [ "${{ github.event.inputs.deploy_modules }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_modules }}" == "true" ]; then
             DEPLOYMENTS+=("Safe Modules")
             STATUSES+=("${{ steps.deploy_modules.outcome }}")
           fi
           
-          if [ "${{ github.event.inputs.deploy_erc20 }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_erc20 }}" == "true" ]; then
             DEPLOYMENTS+=("ERC20 Token")
             STATUSES+=("${{ steps.deploy_erc20.outcome }}")
           fi
           
-          if [ "${{ github.event.inputs.deploy_erc721 }}" == "true" ]; then
+          if [ "${{ steps.parse_targets.outputs.deploy_erc721 }}" == "true" ]; then
             DEPLOYMENTS+=("ERC721 NFT")
             STATUSES+=("${{ steps.deploy_erc721.outcome }}")
           fi

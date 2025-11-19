@@ -1,0 +1,258 @@
+name: Deploy Token Contracts (ERC20/ERC721)
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_rpc_url:
+        description: 'Custom RPC URL for the network'
+        required: true
+        type: string
+      block_explorer_url:
+        description: 'Block explorer URL (optional)'
+        required: false
+        type: string
+      network_name:
+        description: 'Network name (for logging purposes)'
+        required: false
+        type: string
+        default: 'custom'
+      deploy_erc20:
+        description: 'Deploy ERC20 token contract'
+        required: false
+        type: boolean
+        default: true
+      deploy_erc721:
+        description: 'Deploy ERC721 NFT contract'
+        required: false
+        type: boolean
+        default: true
+      erc20_mint_amount:
+        description: 'Amount of ERC20 tokens to mint (default: 1000)'
+        required: false
+        type: string
+        default: '1000'
+      erc721_token_id:
+        description: 'Token ID for ERC721 NFT (default: 1)'
+        required: false
+        type: string
+        default: '1'
+
+jobs:
+  deploy:
+    name: Deploy Token Contracts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt
+          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Deploy ERC20 Token
+        if: ${{ github.event.inputs.deploy_erc20 == 'true' }}
+        id: deploy_erc20
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          ERC20_MINT_AMOUNT: ${{ github.event.inputs.erc20_mint_amount }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying ERC20 token contract..."
+          echo "Network: ${NETWORK:-custom}"
+          echo "Mint amount: ${ERC20_MINT_AMOUNT:-1000}"
+          echo "Chain ID will be fetched from RPC..."
+          # Mask RPC URL - show only protocol and hostname
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          if [ -n "$BLOCK_EXPLORER_URL" ]; then
+            echo "Block Explorer: $BLOCK_EXPLORER_URL"
+          fi
+          
+          pnpm deploy-erc20 --network "${NETWORK:-custom}"
+
+      - name: Deploy ERC721 NFT
+        if: ${{ github.event.inputs.deploy_erc721 == 'true' }}
+        id: deploy_erc721
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          ERC721_TOKEN_ID: ${{ github.event.inputs.erc721_token_id }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying ERC721 NFT contract..."
+          echo "Network: ${NETWORK:-custom}"
+          echo "Token ID: ${ERC721_TOKEN_ID:-1}"
+          echo "Chain ID will be fetched from RPC..."
+          # Mask RPC URL - show only protocol and hostname
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          if [ -n "$BLOCK_EXPLORER_URL" ]; then
+            echo "Block Explorer: $BLOCK_EXPLORER_URL"
+          fi
+          
+          pnpm deploy-nft --network "${NETWORK:-custom}"
+
+      - name: Display deployment summary
+        if: always()
+        run: |
+          echo "## Token Contracts Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network**: ${{ github.event.inputs.network_name || 'custom' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ github.event.inputs.block_explorer_url }}" ]; then
+            echo "- **Block Explorer**: ${{ github.event.inputs.block_explorer_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to read from JSON summary files
+          ERC20_SUMMARY=$(find deployments -name "github-actions-summary-erc20-*-latest.json" -type f | head -1 || true)
+          ERC721_SUMMARY=$(find deployments -name "github-actions-summary-nft-*-latest.json" -type f | head -1 || true)
+          
+          if [ "${{ github.event.inputs.deploy_erc20 }}" == "true" ]; then
+            echo "### ERC20 Token" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ -n "$ERC20_SUMMARY" ] && [ -f "$ERC20_SUMMARY" ] && command -v jq &> /dev/null; then
+              CHAIN_ID=$(jq -r '.chainId // "N/A"' "$ERC20_SUMMARY")
+              if [ "$CHAIN_ID" != "N/A" ] && [ "$CHAIN_ID" != "null" ]; then
+                echo "- **Chain ID**: $CHAIN_ID" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              DEPLOYMENT=$(jq -r '.deployments[0] // empty' "$ERC20_SUMMARY")
+              if [ -n "$DEPLOYMENT" ]; then
+                SUCCESS=$(echo "$DEPLOYMENT" | jq -r '.success // false')
+                TX_HASH=$(echo "$DEPLOYMENT" | jq -r '.txHash // "N/A"')
+                ADDRESS=$(echo "$DEPLOYMENT" | jq -r '.contractAddress // "N/A"')
+                BLOCK=$(echo "$DEPLOYMENT" | jq -r '.blockNumber // "N/A"')
+                
+                if [ "$SUCCESS" = "true" ]; then
+                  STATUS="✅"
+                  if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
+                    STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
+                  fi
+                  if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
+                    STATUS="$STATUS [Block: $BLOCK]"
+                  fi
+                  if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
+                    STATUS="$STATUS [Address: \`$ADDRESS\`]"
+                  fi
+                  echo "- **Status**: $STATUS" >> $GITHUB_STEP_SUMMARY
+                else
+                  ERROR=$(echo "$DEPLOYMENT" | jq -r '.error // "Unknown error"')
+                  echo "- **Status**: ❌ Failed - $ERROR" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            else
+              echo "- ✅ Deployment completed" >> $GITHUB_STEP_SUMMARY
+              echo "- Mint amount: ${{ github.event.inputs.erc20_mint_amount || '1000' }}" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_erc721 }}" == "true" ]; then
+            echo "### ERC721 NFT" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ -n "$ERC721_SUMMARY" ] && [ -f "$ERC721_SUMMARY" ] && command -v jq &> /dev/null; then
+              CHAIN_ID=$(jq -r '.chainId // "N/A"' "$ERC721_SUMMARY")
+              if [ "$CHAIN_ID" != "N/A" ] && [ "$CHAIN_ID" != "null" ]; then
+                echo "- **Chain ID**: $CHAIN_ID" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              DEPLOYMENT=$(jq -r '.deployments[0] // empty' "$ERC721_SUMMARY")
+              if [ -n "$DEPLOYMENT" ]; then
+                SUCCESS=$(echo "$DEPLOYMENT" | jq -r '.success // false')
+                TX_HASH=$(echo "$DEPLOYMENT" | jq -r '.txHash // "N/A"')
+                ADDRESS=$(echo "$DEPLOYMENT" | jq -r '.contractAddress // "N/A"')
+                BLOCK=$(echo "$DEPLOYMENT" | jq -r '.blockNumber // "N/A"')
+                
+                if [ "$SUCCESS" = "true" ]; then
+                  STATUS="✅"
+                  if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
+                    STATUS="$STATUS [TX: \`${TX_HASH:0:10}...\`]"
+                  fi
+                  if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
+                    STATUS="$STATUS [Block: $BLOCK]"
+                  fi
+                  if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
+                    STATUS="$STATUS [Address: \`$ADDRESS\`]"
+                  fi
+                  echo "- **Status**: $STATUS" >> $GITHUB_STEP_SUMMARY
+                else
+                  ERROR=$(echo "$DEPLOYMENT" | jq -r '.error // "Unknown error"')
+                  echo "- **Status**: ❌ Failed - $ERROR" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            else
+              echo "- ✅ Deployment completed" >> $GITHUB_STEP_SUMMARY
+              echo "- Token ID: ${{ github.event.inputs.erc721_token_id || '1' }}" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-results-tokens
+          path: |
+            deployments/
+          retention-days: 30
+          if-no-files-found: warn
+

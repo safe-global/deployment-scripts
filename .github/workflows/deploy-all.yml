@@ -1,0 +1,416 @@
+name: Deploy All Contracts
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_rpc_url:
+        description: 'Custom RPC URL for the network'
+        required: true
+        type: string
+      block_explorer_url:
+        description: 'Block explorer URL (optional)'
+        required: false
+        type: string
+      network_name:
+        description: 'Network name (for logging purposes)'
+        required: false
+        type: string
+        default: 'custom'
+      deploy_1_3_0:
+        description: 'Deploy Safe 1.3.0 Canonical contracts'
+        required: false
+        type: boolean
+        default: false
+      deploy_1_4_1:
+        description: 'Deploy Safe 1.4.1 contracts'
+        required: false
+        type: boolean
+        default: false
+      deploy_1_5_0:
+        description: 'Deploy Safe 1.5.0 contracts'
+        required: false
+        type: boolean
+        default: false
+      deploy_modules:
+        description: 'Deploy Safe Modules contracts'
+        required: false
+        type: boolean
+        default: false
+      deploy_erc20:
+        description: 'Deploy ERC20 token contract'
+        required: false
+        type: boolean
+        default: false
+      deploy_erc721:
+        description: 'Deploy ERC721 NFT contract'
+        required: false
+        type: boolean
+        default: false
+      erc20_mint_amount:
+        description: 'Amount of ERC20 tokens to mint (default: 1000)'
+        required: false
+        type: string
+        default: '1000'
+      erc721_token_id:
+        description: 'Token ID for ERC721 NFT (default: 1)'
+        required: false
+        type: string
+        default: '1'
+
+jobs:
+  deploy:
+    name: Deploy All Contracts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt
+          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Deploy Safe 1.3.0 Canonical
+        if: ${{ github.event.inputs.deploy_1_3_0 == 'true' }}
+        id: deploy_1_3_0
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying Safe 1.3.0 Canonical contracts..."
+          echo "Network: ${NETWORK:-custom}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-1.3.0-canonical --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_1_3_0_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy Safe 1.4.1
+        if: ${{ github.event.inputs.deploy_1_4_1 == 'true' }}
+        id: deploy_1_4_1
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying Safe 1.4.1 contracts..."
+          echo "Network: ${NETWORK:-custom}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-1.4.1 --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_1_4_1_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy Safe 1.5.0
+        if: ${{ github.event.inputs.deploy_1_5_0 == 'true' }}
+        id: deploy_1_5_0
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying Safe 1.5.0 contracts..."
+          echo "Network: ${NETWORK:-custom}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-1.5.0 --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_1_5_0_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy Safe Modules
+        if: ${{ github.event.inputs.deploy_modules == 'true' }}
+        id: deploy_modules
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying Safe Modules contracts..."
+          echo "Network: ${NETWORK:-custom}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-modules --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_modules_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy ERC20 Token
+        if: ${{ github.event.inputs.deploy_erc20 == 'true' }}
+        id: deploy_erc20
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          ERC20_MINT_AMOUNT: ${{ github.event.inputs.erc20_mint_amount }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying ERC20 token contract..."
+          echo "Network: ${NETWORK:-custom}"
+          echo "Mint amount: ${ERC20_MINT_AMOUNT:-1000}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-erc20 --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_erc20_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy ERC721 NFT
+        if: ${{ github.event.inputs.deploy_erc721 == 'true' }}
+        id: deploy_erc721
+        continue-on-error: true
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+          NETWORK: ${{ github.event.inputs.network_name }}
+          ERC721_TOKEN_ID: ${{ github.event.inputs.erc721_token_id }}
+          CI: true
+          GITHUB_ACTIONS: true
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          
+          echo "::notice::Deploying ERC721 NFT contract..."
+          echo "Network: ${NETWORK:-custom}"
+          echo "Token ID: ${ERC721_TOKEN_ID:-1}"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "RPC URL: $RPC_MASKED"
+          
+          pnpm deploy-nft --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_erc721_status=success" >> $GITHUB_OUTPUT
+
+      - name: Display deployment summary
+        if: always()
+        run: |
+          echo "## All Contracts Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network**: ${{ github.event.inputs.network_name || 'custom' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ github.event.inputs.block_explorer_url }}" ]; then
+            echo "- **Block Explorer**: ${{ github.event.inputs.block_explorer_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Track deployment statuses
+          DEPLOYMENTS=()
+          STATUSES=()
+          
+          if [ "${{ github.event.inputs.deploy_1_3_0 }}" == "true" ]; then
+            DEPLOYMENTS+=("Safe 1.3.0 Canonical")
+            STATUSES+=("${{ steps.deploy_1_3_0.outcome }}")
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_1_4_1 }}" == "true" ]; then
+            DEPLOYMENTS+=("Safe 1.4.1")
+            STATUSES+=("${{ steps.deploy_1_4_1.outcome }}")
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_1_5_0 }}" == "true" ]; then
+            DEPLOYMENTS+=("Safe 1.5.0")
+            STATUSES+=("${{ steps.deploy_1_5_0.outcome }}")
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_modules }}" == "true" ]; then
+            DEPLOYMENTS+=("Safe Modules")
+            STATUSES+=("${{ steps.deploy_modules.outcome }}")
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_erc20 }}" == "true" ]; then
+            DEPLOYMENTS+=("ERC20 Token")
+            STATUSES+=("${{ steps.deploy_erc20.outcome }}")
+          fi
+          
+          if [ "${{ github.event.inputs.deploy_erc721 }}" == "true" ]; then
+            DEPLOYMENTS+=("ERC721 NFT")
+            STATUSES+=("${{ steps.deploy_erc721.outcome }}")
+          fi
+          
+          echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          SUCCESS_COUNT=0
+          FAILED_COUNT=0
+          SKIPPED_COUNT=0
+          
+          for i in "${!DEPLOYMENTS[@]}"; do
+            DEPLOYMENT="${DEPLOYMENTS[$i]}"
+            STATUS="${STATUSES[$i]}"
+            
+            case "$STATUS" in
+              "success")
+                echo "- ✅ **$DEPLOYMENT**: Success" >> $GITHUB_STEP_SUMMARY
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+                ;;
+              "failure")
+                echo "- ❌ **$DEPLOYMENT**: Failed" >> $GITHUB_STEP_SUMMARY
+                FAILED_COUNT=$((FAILED_COUNT + 1))
+                ;;
+              "skipped")
+                echo "- ⏭️ **$DEPLOYMENT**: Skipped" >> $GITHUB_STEP_SUMMARY
+                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+                ;;
+              *)
+                echo "- ⚠️ **$DEPLOYMENT**: Unknown status ($STATUS)" >> $GITHUB_STEP_SUMMARY
+                ;;
+            esac
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total**: ${#DEPLOYMENTS[@]}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Successful**: $SUCCESS_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed**: $FAILED_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Skipped**: $SKIPPED_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to read detailed results from summary files
+          if [ -d "deployments" ]; then
+            echo "### Detailed Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Find all latest summary files
+            SUMMARY_FILES=$(find deployments -name "github-actions-summary-*-latest.json" -type f 2>/dev/null || true)
+            
+            if [ -n "$SUMMARY_FILES" ]; then
+              for SUMMARY_FILE in $SUMMARY_FILES; do
+                if [ -f "$SUMMARY_FILE" ] && command -v jq &> /dev/null; then
+                  CONTRACT_NAME=$(jq -r '.deployments[0].contractName // "Unknown"' "$SUMMARY_FILE")
+                  SUCCESS=$(jq -r '.deployments[0].success // false' "$SUMMARY_FILE")
+                  TX_HASH=$(jq -r '.deployments[0].txHash // "N/A"' "$SUMMARY_FILE")
+                  ADDRESS=$(jq -r '.deployments[0].contractAddress // "N/A"' "$SUMMARY_FILE")
+                  BLOCK=$(jq -r '.deployments[0].blockNumber // "N/A"' "$SUMMARY_FILE")
+                  
+                  if [ "$SUCCESS" = "true" ]; then
+                    STATUS_ICON="✅"
+                    DETAILS=""
+                    if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
+                      DETAILS="$DETAILS TX: \`${TX_HASH:0:10}...\`"
+                    fi
+                    if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
+                      DETAILS="$DETAILS Block: $BLOCK"
+                    fi
+                    if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
+                      DETAILS="$DETAILS Address: \`$ADDRESS\`"
+                    fi
+                    echo "- $STATUS_ICON **$CONTRACT_NAME**: $DETAILS" >> $GITHUB_STEP_SUMMARY
+                  else
+                    ERROR=$(jq -r '.deployments[0].error // "Unknown error"' "$SUMMARY_FILE")
+                    echo "- ❌ **$CONTRACT_NAME**: Failed - $ERROR" >> $GITHUB_STEP_SUMMARY
+                  fi
+                fi
+              done
+            fi
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-results-all
+          path: |
+            deployments/
+          retention-days: 30
+          if-no-files-found: warn
+

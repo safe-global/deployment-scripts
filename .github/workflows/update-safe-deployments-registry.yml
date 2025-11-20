@@ -16,6 +16,7 @@ on:
   workflow_run:
     workflows:
       - "Deploy Safe 1.3.0 Canonical Contracts"
+      - "Deploy Safe 1.3.0 EIP-155 Contracts"
       - "Deploy Safe 1.4.1 Contracts"
       - "Deploy Safe 1.5.0 Contracts"
       - "Deploy Safe Modules"
@@ -29,6 +30,7 @@ on:
         type: choice
         options:
           - v1.3.0-canonical
+          - v1.3.0-eip155
           - v1.4.1
           - v1.5.0
       chain_id:
@@ -116,13 +118,19 @@ jobs:
             # Determine artifact name based on workflow
             # Note: Artifact names must match those created in the deployment workflows
             case "$WORKFLOW_NAME" in
-              "Deploy Safe 1.3.0 Canonical Contracts")
-                echo "artifact_name=deployment-summary" >> $GITHUB_OUTPUT
-                echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
-                echo "version=v1.3.0-canonical" >> $GITHUB_OUTPUT
-                echo "is_module=false" >> $GITHUB_OUTPUT
-                ;;
-              "Deploy Safe 1.4.1 Contracts")
+            "Deploy Safe 1.3.0 Canonical Contracts")
+              echo "artifact_name=deployment-summary" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=v1.3.0-canonical" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+            "Deploy Safe 1.3.0 EIP-155 Contracts")
+              echo "artifact_name=deployment-summary-1.3.0-155" >> $GITHUB_OUTPUT
+              echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
+              echo "version=v1.3.0-eip155" >> $GITHUB_OUTPUT
+              echo "is_module=false" >> $GITHUB_OUTPUT
+              ;;
+            "Deploy Safe 1.4.1 Contracts")
                 echo "artifact_name=deployment-summary-1.4.1" >> $GITHUB_OUTPUT
                 echo "summary_file_pattern=github-actions-summary-*-latest.json" >> $GITHUB_OUTPUT
                 echo "version=v1.4.1" >> $GITHUB_OUTPUT

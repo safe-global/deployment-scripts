@@ -11,6 +11,7 @@
     "deploy-modules": "tsx scripts/deploy-modules.ts",
     "deploy-erc20": "tsx scripts/deploy-erc20.ts",
     "deploy-nft": "tsx scripts/deploy-nft.ts",
+    "dry-run": "tsx scripts/dry-run.ts",
     "create-github-issue": "tsx scripts/create-github-issue.ts",
     "create-chain-addition-issue": "tsx scripts/create-chain-addition-issue.ts",
     "create-chain-issue": "tsx scripts/create-chain-addition-issue.ts"

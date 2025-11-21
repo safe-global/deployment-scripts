@@ -2,9 +2,10 @@
  * Gas estimation and management utilities
  */
 
-import type { Chain, Address } from "viem";
+import type { Chain, Address, PublicClient } from "viem";
 import { DEPLOYMENT_CONFIG } from "./config";
-import { GasEstimationError } from "./errors";
+import { GasEstimationError, NetworkError, formatError } from "./errors";
+import { retry } from "./retry";
 
 /**
  * Gas estimation result
@@ -23,14 +24,23 @@ export interface GasEstimate {
 /**
  * Estimates gas for a contract deployment
  * @param estimateGasFn - Function that estimates gas
+ * @param publicClient - Optional public client for fetching gas price
  * @returns Gas estimation result
  */
 export async function estimateDeploymentGas(
-  estimateGasFn: () => Promise<bigint>
+  estimateGasFn: () => Promise<bigint>,
+  publicClient?: PublicClient
 ): Promise<GasEstimate> {
   try {
-    const gas = await estimateGasFn();
-    const gasPrice = await getGasPrice();
+    const gas = await retry(estimateGasFn, {
+      maxAttempts: 3,
+      initialDelayMs: 1000,
+    });
+    
+    const gasPrice = publicClient 
+      ? await getGasPrice(publicClient)
+      : await getGasPriceFallback();
+    
     const estimatedCost = gas * gasPrice;
 
     // Check for warnings
@@ -47,21 +57,41 @@ export async function estimateDeploymentGas(
       estimatedCost,
       warning,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     throw new GasEstimationError(
-      `Failed to estimate gas: ${error.message || String(error)}`,
-      error
+      `Failed to estimate gas: ${formatError(error)}`,
+      error instanceof Error ? error : undefined
     );
   }
 }
 
 /**
- * Gets current gas price (placeholder - should be implemented with actual RPC call)
- * TODO: Implement actual gas price fetching from RPC
+ * Gets current gas price from RPC
+ * @param publicClient - Public client to fetch gas price
+ * @returns Gas price in wei
  */
-async function getGasPrice(): Promise<bigint> {
-  // This is a placeholder - in a real implementation, you would fetch this from the RPC
-  // For now, return a default value
+async function getGasPrice(publicClient: PublicClient): Promise<bigint> {
+  try {
+    const gasPrice = await retry(
+      () => publicClient.getGasPrice(),
+      {
+        maxAttempts: 3,
+        initialDelayMs: 1000,
+      }
+    );
+    return gasPrice;
+  } catch (error: unknown) {
+    console.warn(`⚠ Could not fetch gas price from RPC: ${formatError(error)}`);
+    console.warn("Using fallback gas price...");
+    return getGasPriceFallback();
+  }
+}
+
+/**
+ * Fallback gas price when RPC call fails
+ * @returns Default gas price in wei (20 gwei)
+ */
+function getGasPriceFallback(): bigint {
   return 20000000000n; // 20 gwei
 }
 

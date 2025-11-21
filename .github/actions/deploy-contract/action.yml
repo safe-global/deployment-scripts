@@ -1,0 +1,122 @@
+name: 'Deploy Contract'
+description: 'Deploy a contract using a deployment script'
+inputs:
+  script_name:
+    description: 'Name of the deployment script to run (e.g., deploy-erc20)'
+    required: true
+  network_name:
+    description: 'Network name for the deployment'
+    required: false
+    default: 'custom'
+  custom_rpc_url:
+    description: 'Custom RPC URL for the network'
+    required: true
+  block_explorer_url:
+    description: 'Block explorer URL (optional)'
+    required: false
+  erc20_mint_amount:
+    description: 'Amount of ERC20 tokens to mint (for ERC20 deployments)'
+    required: false
+    default: '1000'
+  erc721_token_id:
+    description: 'Token ID for ERC721 NFT (for ERC721 deployments)'
+    required: false
+    default: '1'
+
+outputs:
+  deployment_success:
+    description: 'Whether the deployment was successful'
+    value: ${{ steps.deploy.outputs.success }}
+  tx_hash:
+    description: 'Transaction hash of the deployment'
+    value: ${{ steps.deploy.outputs.tx_hash }}
+  contract_address:
+    description: 'Address of the deployed contract'
+    value: ${{ steps.deploy.outputs.contract_address }}
+  block_number:
+    description: 'Block number of the deployment'
+    value: ${{ steps.deploy.outputs.block_number }}
+  gas_used:
+    description: 'Gas used for the deployment'
+    value: ${{ steps.deploy.outputs.gas_used }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.script_name }}" ]; then
+          echo "::error::script_name is required"
+          exit 1
+        fi
+        if [ -z "${{ inputs.custom_rpc_url }}" ]; then
+          echo "::error::custom_rpc_url is required"
+          exit 1
+        fi
+
+    - name: Deploy contract
+      id: deploy
+      shell: bash
+      continue-on-error: true
+      env:
+        PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        CUSTOM_RPC_URL: ${{ inputs.custom_rpc_url }}
+        BLOCK_EXPLORER_URL: ${{ inputs.block_explorer_url }}
+        NETWORK: ${{ inputs.network_name }}
+        ERC20_MINT_AMOUNT: ${{ inputs.erc20_mint_amount }}
+        ERC721_TOKEN_ID: ${{ inputs.erc721_token_id }}
+        CI: true
+        GITHUB_ACTIONS: true
+      run: |
+        if [ -z "$PRIVATE_KEY" ]; then
+          echo "::error::PRIVATE_KEY secret is not set"
+          exit 1
+        fi
+        
+        if [ -z "$CUSTOM_RPC_URL" ]; then
+          echo "::error::CUSTOM_RPC_URL is required"
+          exit 1
+        fi
+        
+        echo "::notice::Deploying contract using script: ${{ inputs.script_name }}"
+        echo "Network: ${NETWORK:-custom}"
+        
+        # Mask RPC URL for security
+        RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+        echo "RPC URL: $RPC_MASKED"
+        
+        # Run the deployment script
+        if pnpm ${{ inputs.script_name }} --network "${NETWORK:-custom}"; then
+          echo "success=true" >> $GITHUB_OUTPUT
+          
+          # Try to read deployment results from summary file
+          SUMMARY_FILE="deployments/github-actions-summary-*-latest.json"
+          if ls $SUMMARY_FILE 1> /dev/null 2>&1; then
+            LATEST_FILE=$(ls -t $SUMMARY_FILE | head -1)
+            if [ -f "$LATEST_FILE" ] && command -v jq &> /dev/null; then
+              TX_HASH=$(jq -r '.deployments[0].txHash // empty' "$LATEST_FILE" 2>/dev/null || echo "")
+              ADDRESS=$(jq -r '.deployments[0].contractAddress // empty' "$LATEST_FILE" 2>/dev/null || echo "")
+              BLOCK=$(jq -r '.deployments[0].blockNumber // empty' "$LATEST_FILE" 2>/dev/null || echo "")
+              GAS=$(jq -r '.deployments[0].gasUsed // empty' "$LATEST_FILE" 2>/dev/null || echo "")
+              
+              if [ -n "$TX_HASH" ] && [ "$TX_HASH" != "null" ]; then
+                echo "tx_hash=$TX_HASH" >> $GITHUB_OUTPUT
+              fi
+              if [ -n "$ADDRESS" ] && [ "$ADDRESS" != "null" ]; then
+                echo "contract_address=$ADDRESS" >> $GITHUB_OUTPUT
+              fi
+              if [ -n "$BLOCK" ] && [ "$BLOCK" != "null" ]; then
+                echo "block_number=$BLOCK" >> $GITHUB_OUTPUT
+              fi
+              if [ -n "$GAS" ] && [ "$GAS" != "null" ]; then
+                echo "gas_used=$GAS" >> $GITHUB_OUTPUT
+              fi
+            fi
+          fi
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "::error::Deployment failed"
+          exit 1
+        fi
+

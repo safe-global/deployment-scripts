@@ -71,6 +71,9 @@ This repository provides several deployment scripts:
 2. **`deploy-1.4.1`** - Deploy Safe 1.4.1 contracts
 3. **`deploy-1.5.0`** - Deploy Safe 1.5.0 contracts
 4. **`deploy-modules`** - Deploy Safe modules (social-recovery and allowance)
+5. **`deploy-erc20`** - Deploy ERC20 token contract
+6. **`deploy-nft`** - Deploy ERC721 NFT contract
+7. **`dry-run`** - Test all utilities and configuration without deploying contracts
 
 ### Local Deployment
 
@@ -127,6 +130,32 @@ export BLOCK_EXPLORER_URL=https://your-explorer.com
 # Run deployment (chain ID will be auto-detected from RPC)
 pnpm deploy-modules --network custom
 ```
+
+#### Dry Run (Testing Without Deployment)
+
+Before deploying, you can test all utilities and configuration without actually deploying contracts:
+
+```bash
+# Run dry-run to validate everything is set up correctly
+pnpm dry-run
+```
+
+The dry-run script will:
+- ✅ Test all validation utilities
+- ✅ Verify configuration settings
+- ✅ Check deployment utilities
+- ✅ Test retry logic
+- ✅ Validate gas estimation
+- ✅ Check error handling
+- ✅ Verify file structure
+- ✅ Test environment validation
+- ✅ Validate account creation
+
+This is useful for:
+- Verifying your environment setup
+- Testing configuration changes
+- Debugging utility functions
+- Ensuring everything works before actual deployments
 
 ### How It Works
 
@@ -325,8 +354,15 @@ gh workflow run deploy-all.yml \
   --ref main \
   -f custom_rpc_url=https://your-rpc-url.com \
   -f network_name=custom \
-  -f deploy_targets=1.5.0,modules
+  -f deploy_targets=1.5.0,modules \
+  -f erc20_mint_amount=1000 \
+  -f erc721_token_id=1
 ```
+
+**Note**: The `deploy_targets` parameter accepts:
+- Single target: `"1.5.0"`
+- Multiple targets (comma-separated): `"1.5.0,modules,erc20,erc721"`
+- All targets: `"all"` (cannot be combined with other targets)
 
 #### Input Parameters Reference
 

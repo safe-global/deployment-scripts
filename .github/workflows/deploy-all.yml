@@ -68,19 +68,36 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends jq
 
-      - name: Parse deployment targets
+      - name: Parse and validate deployment targets
         id: parse_targets
         run: |
           DEPLOY_TARGETS="${{ github.event.inputs.deploy_targets }}"
+          
+          # Normalize input: lowercase, remove spaces
           DEPLOY_TARGETS=$(echo "$DEPLOY_TARGETS" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
           
+          # If empty, exit gracefully
           if [ -z "$DEPLOY_TARGETS" ] || [ "$DEPLOY_TARGETS" = "" ]; then
-            echo "No deployment targets specified"
+            echo "::notice::No deployment targets specified, skipping all deployments"
+            echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
+            echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
+            echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
+            echo "deploy_modules=false" >> $GITHUB_OUTPUT
+            echo "deploy_erc20=false" >> $GITHUB_OUTPUT
+            echo "deploy_erc721=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           
+          # Valid target names
+          VALID_TARGETS=("1.3.0" "1.4.1" "1.5.0" "modules" "erc20" "erc721" "all")
+          
           # Check for "all" keyword
-          if echo "$DEPLOY_TARGETS" | grep -q "all"; then
+          if echo "$DEPLOY_TARGETS" | grep -qE "^all$|^all,|,all$|,all,"; then
+            if [ "$DEPLOY_TARGETS" != "all" ]; then
+              echo "::error::Invalid deploy_targets: 'all' cannot be combined with other targets"
+              exit 1
+            fi
+            echo "::notice::Deploying all targets"
             echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT
             echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT
             echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT
@@ -88,13 +105,46 @@ jobs:
             echo "deploy_erc20=true" >> $GITHUB_OUTPUT
             echo "deploy_erc721=true" >> $GITHUB_OUTPUT
           else
-            # Check individual targets
-            echo "$DEPLOY_TARGETS" | grep -q "1.3.0" && echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
-            echo "$DEPLOY_TARGETS" | grep -q "1.4.1" && echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT || echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
-            echo "$DEPLOY_TARGETS" | grep -q "1.5.0" && echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
-            echo "$DEPLOY_TARGETS" | grep -q "modules" && echo "deploy_modules=true" >> $GITHUB_OUTPUT || echo "deploy_modules=false" >> $GITHUB_OUTPUT
-            echo "$DEPLOY_TARGETS" | grep -q "erc20" && echo "deploy_erc20=true" >> $GITHUB_OUTPUT || echo "deploy_erc20=false" >> $GITHUB_OUTPUT
-            echo "$DEPLOY_TARGETS" | grep -q "erc721" && echo "deploy_erc721=true" >> $GITHUB_OUTPUT || echo "deploy_erc721=false" >> $GITHUB_OUTPUT
+            # Split by comma and validate each target
+            IFS=',' read -ra TARGET_ARRAY <<< "$DEPLOY_TARGETS"
+            INVALID_TARGETS=()
+            
+            for target in "${TARGET_ARRAY[@]}"; do
+              # Trim whitespace
+              target=$(echo "$target" | xargs)
+              
+              # Check if target is valid
+              VALID=false
+              for valid_target in "${VALID_TARGETS[@]}"; do
+                if [ "$target" = "$valid_target" ]; then
+                  VALID=true
+                  break
+                fi
+              done
+              
+              if [ "$VALID" = false ]; then
+                INVALID_TARGETS+=("$target")
+              fi
+            done
+            
+            # If any invalid targets found, fail
+            if [ ${#INVALID_TARGETS[@]} -gt 0 ]; then
+              echo "::error::Invalid deployment targets: ${INVALID_TARGETS[*]}"
+              echo "::error::Valid options are: ${VALID_TARGETS[*]}"
+              exit 1
+            fi
+            
+            # Set outputs for each target
+            echo "$DEPLOY_TARGETS" | grep -qE "^1\.3\.0$|^1\.3\.0,|,1\.3\.0$|,1\.3\.0," && echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^1\.4\.1$|^1\.4\.1,|,1\.4\.1$|,1\.4\.1," && echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT || echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^1\.5\.0$|^1\.5\.0,|,1\.5\.0$|,1\.5\.0," && echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^modules$|^modules,|,modules$|,modules," && echo "deploy_modules=true" >> $GITHUB_OUTPUT || echo "deploy_modules=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^erc20$|^erc20,|,erc20$|,erc20," && echo "deploy_erc20=true" >> $GITHUB_OUTPUT || echo "deploy_erc20=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^erc721$|^erc721,|,erc721$|,erc721," && echo "deploy_erc721=true" >> $GITHUB_OUTPUT || echo "deploy_erc721=false" >> $GITHUB_OUTPUT
+            
+            # Show what will be deployed
+            SELECTED_TARGETS=$(echo "$DEPLOY_TARGETS" | tr ',' ' ')
+            echo "::notice::Deploying targets: $SELECTED_TARGETS"
           fi
 
       - name: Deploy Safe 1.3.0 Canonical

@@ -42,12 +42,17 @@ pnpm install
 
 3. Set up environment variables:
 ```bash
-# Create .env file
-PRIVATE_KEY=0x...  # Your deployer private key (must start with 0x)
-RPC_URL=https://...  # RPC URL for your network
-# Or use network-specific variables:
-# SEPOLIA_RPC_URL=https://...
-# MAINNET_RPC_URL=https://...
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env and fill in your values:
+PRIVATE_KEY=0x...  # Your deployer private key (with or without 0x prefix)
+CUSTOM_RPC_URL=https://...  # RPC URL for your network
+BLOCK_EXPLORER_URL=https://...  # Optional: Block explorer URL
+NETWORK=custom  # Optional: Network name for logging
+```
+
+See `scripts/utils/README.md` for detailed information about available utilities and configuration options.
 # CUSTOM_RPC_URL=https://...  # For custom networks
 ```
 

@@ -1,8 +1,22 @@
-import { createWalletClient, createPublicClient, http, type Address, defineChain, type Chain, formatEther } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { type Address, defineChain, type Chain, formatEther } from "viem";
 import * as fs from "fs";
 import * as path from "path";
 import * as dotenv from "dotenv";
+
+// Import shared utilities
+import { validateEnvironment, validateRpcUrl } from "./utils/validation";
+import {
+  createDeploymentWalletClient,
+  createDeploymentPublicClient,
+  getDeploymentAccount,
+  getChainId,
+  wait,
+  maskUrl,
+  getNetworkName,
+  isCI,
+} from "./utils/deployment";
+import { DEPLOYMENT_CONFIG, ENV_DEFAULTS } from "./utils/config";
+import { ConfigurationError, ValidationError, TransactionError, formatError } from "./utils/errors";
 
 dotenv.config();
 
@@ -156,9 +170,12 @@ function createGitHubActionsSummary(
  */
 function createCustomChain(rpcUrl: string, chainId: number): Chain {
   const chainName = process.env.CHAIN_NAME || `Custom Chain ${chainId}`;
-  const nativeCurrencyName = process.env.NATIVE_CURRENCY_NAME || "Ether";
-  const nativeCurrencySymbol = process.env.NATIVE_CURRENCY_SYMBOL || "ETH";
-  const nativeCurrencyDecimals = parseInt(process.env.NATIVE_CURRENCY_DECIMALS || "18", 10);
+  const nativeCurrencyName = process.env.NATIVE_CURRENCY_NAME || ENV_DEFAULTS.NATIVE_CURRENCY_NAME;
+  const nativeCurrencySymbol = process.env.NATIVE_CURRENCY_SYMBOL || ENV_DEFAULTS.NATIVE_CURRENCY_SYMBOL;
+  const nativeCurrencyDecimals = parseInt(
+    process.env.NATIVE_CURRENCY_DECIMALS || ENV_DEFAULTS.NATIVE_CURRENCY_DECIMALS,
+    10
+  );
   const blockExplorerUrl = process.env.BLOCK_EXPLORER_URL;
 
   const chain = defineChain({
@@ -189,11 +206,11 @@ function createCustomChain(rpcUrl: string, chainId: number): Chain {
 }
 
 async function deployContract(
-  client: ReturnType<typeof createWalletClient>,
-  publicClient: ReturnType<typeof createPublicClient>,
+  client: ReturnType<typeof createDeploymentWalletClient>,
+  publicClient: ReturnType<typeof createDeploymentPublicClient>,
   deploymentData: DeploymentData,
   contractName: string,
-  account: ReturnType<typeof privateKeyToAccount>,
+  account: ReturnType<typeof getDeploymentAccount>,
   chain: Chain | undefined,
   networkName: string,
   chainId: number
@@ -338,12 +355,17 @@ async function deployContract(
       console.log("\nTransaction logs:", receipt.logs.length);
     }
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     result.success = false;
-    result.error = error.message || String(error);
+    result.error = formatError(error);
     console.error("\n✗ Deployment failed:");
-    if (error.message) {
-      console.error("Error:", error.message);
+    console.error("Error:", result.error);
+    
+    // Provide more context for specific error types
+    if (error instanceof TransactionError) {
+      console.error(`Transaction hash: ${error.txHash || "N/A"}`);
+    } else if (error instanceof ValidationError) {
+      console.error(`Field: ${error.field || "N/A"}`);
     }
   }
 
@@ -351,105 +373,70 @@ async function deployContract(
 }
 
 async function main() {
-  // Parse network from arguments
-  const networkIndex = process.argv.indexOf("--network");
-  const networkName = networkIndex !== -1 && process.argv[networkIndex + 1] 
-    ? process.argv[networkIndex + 1] 
-    : process.env.NETWORK || "localhost";
+  try {
+    // Validate environment variables early
+    validateEnvironment();
 
-  // Get RPC URL from environment or use defaults
-  // Priority: CUSTOM_RPC_URL > network-specific RPC_URL > generic RPC_URL > localhost default
-  const rpcUrl = process.env.CUSTOM_RPC_URL ||
-                 process.env[`${networkName.toUpperCase()}_RPC_URL`] || 
-                 process.env.RPC_URL || 
-                 (networkName === "localhost" ? "http://127.0.0.1:8545" : "");
+    // Parse network from arguments
+    const networkIndex = process.argv.indexOf("--network");
+    const networkName =
+      networkIndex !== -1 && process.argv[networkIndex + 1]
+        ? process.argv[networkIndex + 1]
+        : getNetworkName();
 
-  if (!rpcUrl) {
-    console.error(`No RPC URL found for network: ${networkName}`);
-    console.error(`Please set CUSTOM_RPC_URL, ${networkName.toUpperCase()}_RPC_URL, or RPC_URL environment variable`);
-    process.exit(1);
-  }
+    // Get RPC URL from environment
+    // Priority: CUSTOM_RPC_URL > network-specific RPC_URL > generic RPC_URL > localhost default
+    const rpcUrl =
+      process.env.CUSTOM_RPC_URL ||
+      process.env[`${networkName.toUpperCase()}_RPC_URL`] ||
+      process.env.RPC_URL ||
+      (networkName === "localhost" ? "http://127.0.0.1:8545" : "");
 
-  // Get private key from environment
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    console.error("PRIVATE_KEY environment variable is required");
-    process.exit(1);
-  }
-
-  if (!privateKey.startsWith("0x")) {
-    console.error("PRIVATE_KEY must start with 0x");
-    process.exit(1);
-  }
-
-  // Path to 1.4.1 directory
-  const deploymentDir = path.join(
-    process.cwd(),
-    "contracts",
-    "deployement-data",
-    "smart-account",
-    "1.4.1"
-  );
-
-  if (!fs.existsSync(deploymentDir)) {
-    console.error(`Directory not found: ${deploymentDir}`);
-    process.exit(1);
-  }
-
-  // Create account from private key
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
-
-  // GitHub Actions output formatting
-  const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
-
-  // Helper function to mask RPC URL for security
-  const maskRpcUrl = (url: string): string => {
-    try {
-      const urlObj = new URL(url);
-      // Show protocol and hostname, mask path and query params
-      const protocol = urlObj.protocol;
-      const hostname = urlObj.hostname;
-      const port = urlObj.port ? `:${urlObj.port}` : '';
-      // Mask any API keys in path or query
-      return `${protocol}//${hostname}${port}${urlObj.pathname ? '/***' : ''}${urlObj.search ? '?***' : ''}`;
-    } catch {
-      // If URL parsing fails, mask everything except first few chars
-      return url.length > 10 ? `${url.substring(0, 10)}...` : '***';
+    if (!rpcUrl) {
+      throw new ConfigurationError(
+        `No RPC URL found for network: ${networkName}\n` +
+        `Please set CUSTOM_RPC_URL, ${networkName.toUpperCase()}_RPC_URL, or RPC_URL environment variable`
+      );
     }
-  };
 
-  console.log("\n" + "=".repeat(60));
-  console.log("Safe 1.4.1 Deployment Script");
-  console.log("=".repeat(60));
-  console.log("Deployer address:", account.address);
-  console.log("Network:", networkName);
-  console.log("RPC URL:", maskRpcUrl(rpcUrl));
-  console.log("Deployment directory:", deploymentDir);
+    // Validate RPC URL format
+    validateRpcUrl(rpcUrl);
 
-  // Create a temporary public client to fetch chain ID from RPC
-  const tempPublicClient = createPublicClient({
-    transport: http(rpcUrl),
-  });
+    // Path to 1.4.1 directory
+    const deploymentDir = path.join(
+      process.cwd(),
+      "contracts",
+      "deployement-data",
+      "smart-account",
+      "1.4.1"
+    );
 
-  // Fetch chain ID from RPC
-  console.log("Fetching chain ID from RPC...");
-  const chainId = await tempPublicClient.getChainId();
-  console.log("Chain ID (from RPC):", chainId);
+    if (!fs.existsSync(deploymentDir)) {
+      throw new ConfigurationError(`Directory not found: ${deploymentDir}`);
+    }
 
-  // Create custom chain using the fetched chain ID
-  const customChain = createCustomChain(rpcUrl, chainId);
+    // Get deployment account (validates private key)
+    const account = getDeploymentAccount();
 
-  // Create clients with the proper chain configuration
-  const client = createWalletClient({
-    account,
-    transport: http(rpcUrl),
-    chain: customChain,
-  });
+    console.log("\n" + "=".repeat(60));
+    console.log("Safe 1.4.1 Deployment Script");
+    console.log("=".repeat(60));
+    console.log("Deployer address:", account.address);
+    console.log("Network:", networkName);
+    console.log("RPC URL:", maskUrl(rpcUrl));
+    console.log("Deployment directory:", deploymentDir);
 
-  const publicClient = createPublicClient({
-    transport: http(rpcUrl),
-    chain: customChain,
-  });
+    // Fetch chain ID from RPC using utility function
+    console.log("Fetching chain ID from RPC...");
+    const chainId = await getChainId(rpcUrl);
+    console.log("Chain ID (from RPC):", chainId);
+
+    // Create custom chain using the fetched chain ID
+    const customChain = createCustomChain(rpcUrl, chainId);
+
+    // Create clients using utility functions
+    const client = createDeploymentWalletClient(rpcUrl, customChain);
+    const publicClient = createDeploymentPublicClient(rpcUrl, customChain);
 
   // Get and display ETH balance
   try {
@@ -459,12 +446,12 @@ async function main() {
     console.log("ETH Balance (wei):", balance.toString());
     
     // Set GitHub Actions output
-    if (isCI && process.env.GITHUB_OUTPUT) {
+    if (isCI() && process.env.GITHUB_OUTPUT) {
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
     }
-  } catch (error: any) {
-    console.warn("⚠ Could not fetch ETH balance:", error.message);
+  } catch (error: unknown) {
+    console.warn("⚠ Could not fetch ETH balance:", formatError(error));
   }
 
   // Initialize deployment session ID for batch deployments
@@ -474,7 +461,7 @@ async function main() {
   }
 
   // Set GitHub Actions output
-  if (isCI && process.env.GITHUB_OUTPUT) {
+  if (isCI() && process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployer_address=${account.address}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `network=${networkName}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `chain_id=${chainId}\n`);
@@ -547,14 +534,15 @@ async function main() {
       }
 
       // Small delay between deployments to avoid nonce issues
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await wait(DEPLOYMENT_CONFIG.delays.betweenDeployments);
 
-    } catch (error: any) {
-      console.error(`\n✗ Failed to read or process ${file.name}:`, error.message);
+    } catch (error: unknown) {
+      const errorMessage = formatError(error);
+      console.error(`\n✗ Failed to read or process ${file.name}:`, errorMessage);
       results.push({
         contractName: file.name,
         success: false,
-        error: error.message || String(error),
+        error: errorMessage,
       });
       failureCount++;
     }
@@ -590,7 +578,7 @@ async function main() {
   });
 
   // Set GitHub Actions output for summary
-  if (isCI && process.env.GITHUB_OUTPUT) {
+  if (isCI() && process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `total_contracts=${results.length}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `successful=${successCount}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `failed=${failureCount}\n`);
@@ -622,8 +610,23 @@ async function main() {
   const finalChainId = await publicClient.getChainId();
   createGitHubActionsSummary(results, networkName, finalChainId);
 
-  // Exit with error code if any deployments failed
-  if (failureCount > 0) {
+    // Exit with error code if any deployments failed
+    if (failureCount > 0) {
+      process.exit(1);
+    }
+  } catch (error: unknown) {
+    console.error("\n✗ Fatal error:");
+    console.error(formatError(error));
+
+    if (error instanceof ConfigurationError || error instanceof ValidationError) {
+      console.error("\nPlease check your environment variables and configuration.");
+    }
+
+    if (isCI() && process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `fatal_error=true\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `error=${formatError(error).replace(/\n/g, ' ')}\n`);
+    }
+
     process.exit(1);
   }
 }
@@ -631,7 +634,7 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.error(error);
+    console.error("Unhandled error:", formatError(error));
     process.exit(1);
   });
 

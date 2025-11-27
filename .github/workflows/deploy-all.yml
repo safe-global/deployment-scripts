@@ -411,3 +411,153 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Trigger update-registry for each successful deployment
+        if: success() || failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.SAFE_DEPLOYMENTS_1_TOKEN }}
+        run: |
+          # Skip if no token is configured
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "::warning::SAFE_DEPLOYMENTS_1_TOKEN not configured. Skipping registry updates."
+            exit 0
+          fi
+          
+          # Get chain ID from deployment summary
+          CHAIN_ID=""
+          if [ -d "deployments" ]; then
+            FIRST_SUMMARY=$(find deployments -name "github-actions-summary-*-latest.json" -type f 2>/dev/null | head -1)
+            if [ -n "$FIRST_SUMMARY" ] && [ -f "$FIRST_SUMMARY" ] && command -v jq &> /dev/null; then
+              CHAIN_ID=$(jq -r '.chainId // ""' "$FIRST_SUMMARY")
+            fi
+          fi
+          
+          if [ -z "$CHAIN_ID" ] || [ "$CHAIN_ID" = "null" ]; then
+            echo "::warning::Could not determine chain ID. Skipping registry updates."
+            exit 0
+          fi
+          
+          echo "Chain ID: $CHAIN_ID"
+          
+          REPO="Fbartoli/safe-deployments"
+          WORKFLOW_FILE="update-registry.yml"
+          
+          # Get default branch
+          REPO_INFO=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO")
+          DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch // "main"')
+          
+          # Get workflow ID
+          WORKFLOW_RESPONSE=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW_FILE")
+          WORKFLOW_ID=$(echo "$WORKFLOW_RESPONSE" | jq -r '.id')
+          
+          if [ "$WORKFLOW_ID" = "null" ] || [ -z "$WORKFLOW_ID" ]; then
+            echo "::error::Could not get workflow ID for $WORKFLOW_FILE"
+            exit 1
+          fi
+          
+          trigger_update() {
+            local VERSION=$1
+            local STEP_OUTCOME=$2
+            
+            if [ "$STEP_OUTCOME" != "success" ]; then
+              echo "⏭️ Skipping $VERSION (not successful: $STEP_OUTCOME)"
+              return
+            fi
+            
+            echo "🔄 Triggering update-registry for $VERSION..."
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW_ID/dispatches" \
+              -d "{
+                \"ref\": \"$DEFAULT_BRANCH\",
+                \"inputs\": {
+                  \"version\": \"$VERSION\",
+                  \"chain_id\": \"$CHAIN_ID\"
+                }
+              }")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            
+            if [ "$HTTP_CODE" -eq 204 ]; then
+              echo "✅ Successfully triggered update-registry for $VERSION"
+            else
+              echo "::warning::Failed to trigger update-registry for $VERSION (HTTP $HTTP_CODE)"
+            fi
+            
+            # Small delay to avoid rate limiting
+            sleep 2
+          }
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Registry Updates" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          TRIGGERED_COUNT=0
+          
+          # Trigger for each successful deployment
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0 }}" == "true" ]; then
+            trigger_update "v1.3.0-canonical" "${{ steps.deploy_1_3_0.outcome }}"
+            if [ "${{ steps.deploy_1_3_0.outcome }}" == "success" ]; then
+              echo "- ✅ Triggered registry update for **v1.3.0-canonical**" >> $GITHUB_STEP_SUMMARY
+              TRIGGERED_COUNT=$((TRIGGERED_COUNT + 1))
+            fi
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0_155 }}" == "true" ]; then
+            trigger_update "v1.3.0-eip155" "${{ steps.deploy_1_3_0_155.outcome }}"
+            if [ "${{ steps.deploy_1_3_0_155.outcome }}" == "success" ]; then
+              echo "- ✅ Triggered registry update for **v1.3.0-eip155**" >> $GITHUB_STEP_SUMMARY
+              TRIGGERED_COUNT=$((TRIGGERED_COUNT + 1))
+            fi
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_4_1 }}" == "true" ]; then
+            trigger_update "v1.4.1" "${{ steps.deploy_1_4_1.outcome }}"
+            if [ "${{ steps.deploy_1_4_1.outcome }}" == "success" ]; then
+              echo "- ✅ Triggered registry update for **v1.4.1**" >> $GITHUB_STEP_SUMMARY
+              TRIGGERED_COUNT=$((TRIGGERED_COUNT + 1))
+            fi
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_5_0 }}" == "true" ]; then
+            trigger_update "v1.5.0" "${{ steps.deploy_1_5_0.outcome }}"
+            if [ "${{ steps.deploy_1_5_0.outcome }}" == "success" ]; then
+              echo "- ✅ Triggered registry update for **v1.5.0**" >> $GITHUB_STEP_SUMMARY
+              TRIGGERED_COUNT=$((TRIGGERED_COUNT + 1))
+            fi
+          fi
+          
+          # Note: Modules are skipped as the registry only supports Safe Smart Account versions
+          if [ "${{ steps.parse_targets.outputs.deploy_modules }}" == "true" ] && [ "${{ steps.deploy_modules.outcome }}" == "success" ]; then
+            echo "- ⏭️ Skipped **modules** (registry only supports Smart Account versions)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Note: Tokens are not part of the safe-deployments registry
+          if [ "${{ steps.parse_targets.outputs.deploy_erc20 }}" == "true" ] && [ "${{ steps.deploy_erc20.outcome }}" == "success" ]; then
+            echo "- ⏭️ Skipped **ERC20** (not part of Safe deployments registry)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_erc721 }}" == "true" ] && [ "${{ steps.deploy_erc721.outcome }}" == "success" ]; then
+            echo "- ⏭️ Skipped **ERC721** (not part of Safe deployments registry)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ $TRIGGERED_COUNT -gt 0 ]; then
+            echo "**Total**: $TRIGGERED_COUNT registry update(s) triggered" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check progress: https://github.com/$REPO/actions" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**No registry updates triggered** (no successful Smart Account deployments)" >> $GITHUB_STEP_SUMMARY
+          fi
+

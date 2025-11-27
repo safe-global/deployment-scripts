@@ -10,19 +10,16 @@ import * as dotenv from "dotenv";
 // Import all utilities
 import { validateEnvironment, validateRpcUrl, validatePrivateKey, validateChainId, validateDeployTargets } from "./utils/validation";
 import {
-  createDeploymentWalletClient,
-  createDeploymentPublicClient,
   getDeploymentAccount,
-  getChainId,
   wait,
   maskUrl,
   formatAddress,
   getNetworkName,
   isCI,
 } from "./utils/deployment";
-import { DEPLOYMENT_CONFIG, ENV_DEFAULTS, VALID_DEPLOY_TARGETS } from "./utils/config";
+import { DEPLOYMENT_CONFIG, VALID_DEPLOY_TARGETS } from "./utils/config";
 import { ConfigurationError, ValidationError, NetworkError, formatError } from "./utils/errors";
-import { estimateDeploymentGas, formatGas, formatGasCost, logGasEstimate } from "./utils/gas";
+import { estimateDeploymentGas, formatGas, formatGasCost } from "./utils/gas";
 import { retry, retryWithFixedDelay } from "./utils/retry";
 
 dotenv.config();

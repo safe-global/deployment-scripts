@@ -13,7 +13,7 @@ import {
   walletActions,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { DEPLOYMENT_CONFIG } from "./config";
+import { DEPLOYMENT_CONFIG, ENV_DEFAULTS } from "./config";
 import { validateRpcUrl, validatePrivateKey, validateChainId } from "./validation";
 
 /**
@@ -82,9 +82,10 @@ export async function getChainId(rpcUrl: string): Promise<number> {
     const chainId = await publicClient.getChainId();
     validateChainId(chainId);
     return chainId;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Failed to fetch chain ID from RPC: ${error.message || String(error)}`
+      `Failed to fetch chain ID from RPC: ${errorMessage}`
     );
   }
 }
@@ -131,6 +132,6 @@ export function isCI(): boolean {
  * Gets the network name from environment or defaults
  */
 export function getNetworkName(): string {
-  return process.env.NETWORK || DEPLOYMENT_CONFIG.paths.deploymentData;
+  return process.env.NETWORK || ENV_DEFAULTS.NETWORK;
 }
 

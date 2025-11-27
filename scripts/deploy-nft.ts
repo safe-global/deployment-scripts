@@ -205,19 +205,20 @@ async function deployNFT(
               if (owner.toLowerCase() === account.address.toLowerCase()) {
                 console.log("✓ Ownership verified!");
               }
-            } catch (error: any) {
-              console.warn("⚠ Could not verify ownership:", error.message);
+            } catch (error: unknown) {
+              console.warn("⚠ Could not verify ownership:", formatError(error));
             }
           } else {
             console.warn("⚠ Mint transaction failed");
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Check if error is because safeMint function doesn't exist
-          if (error.message?.includes("Function") && error.message?.includes("not found")) {
+          const errorMsg = formatError(error);
+          if (errorMsg.includes("Function") && errorMsg.includes("not found")) {
             console.warn(`\n⚠ safeMint function not found in contract. Skipping mint.`);
             console.warn(`This is normal if the ERC721 contract doesn't have a safeMint function.`);
           } else {
-            console.warn(`\n⚠ Failed to mint NFT:`, error.message || String(error));
+            console.warn(`\n⚠ Failed to mint NFT:`, errorMsg);
             console.warn(`Continuing without mint...`);
           }
         }

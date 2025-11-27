@@ -249,8 +249,8 @@ async function deployContract(
         } else {
           console.log("No bytecode found at expected address. Proceeding with deployment...");
         }
-      } catch (error: any) {
-        console.warn(`⚠ Could not check if contract exists: ${error.message}`);
+      } catch (error: unknown) {
+        console.warn(`⚠ Could not check if contract exists: ${formatError(error)}`);
         console.log("Proceeding with deployment...");
       }
     } else {
@@ -318,8 +318,8 @@ async function deployContract(
             result.contractAddress = deploymentData.expectedAddress;
             result.success = true; // Still consider it success since contract exists (or should exist)
           }
-        } catch (error: any) {
-          console.warn(`⚠ Could not verify contract deployment: ${error.message}`);
+        } catch (error: unknown) {
+          console.warn(`⚠ Could not verify contract deployment: ${formatError(error)}`);
           // Still use expected address as contract address
           result.contractAddress = deploymentData.expectedAddress;
           console.log("Deployed contract address:", deploymentData.expectedAddress);
@@ -434,180 +434,195 @@ async function main() {
     const client = createDeploymentWalletClient(rpcUrl, customChain);
     const publicClient = createDeploymentPublicClient(rpcUrl, customChain);
 
-  // Get and display ETH balance
-  try {
-    const balance = await publicClient.getBalance({ address: account.address });
-    const balanceInEth = formatEther(balance);
-    console.log("ETH Balance:", balanceInEth, "ETH");
-    console.log("ETH Balance (wei):", balance.toString());
-    
+    // Get and display ETH balance
+    try {
+      const balance = await publicClient.getBalance({ address: account.address });
+      const balanceInEth = formatEther(balance);
+      console.log("ETH Balance:", balanceInEth, "ETH");
+      console.log("ETH Balance (wei):", balance.toString());
+      
+      // Set GitHub Actions output
+      if (isCI() && process.env.GITHUB_OUTPUT) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
+      }
+    } catch (error: unknown) {
+      console.warn("⚠ Could not fetch ETH balance:", formatError(error));
+    }
+
+    // Initialize deployment session ID for batch deployments
+    if (!deploymentSessionId) {
+      deploymentSessionId = process.env.DEPLOYMENT_SESSION_ID || `session-${Date.now()}`;
+      console.log("Deployment session ID:", deploymentSessionId);
+    }
+
     // Set GitHub Actions output
     if (isCI() && process.env.GITHUB_OUTPUT) {
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployer_address=${account.address}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `network=${networkName}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `chain_id=${chainId}\n`);
     }
-  } catch (error: unknown) {
-    console.warn("⚠ Could not fetch ETH balance:", formatError(error));
-  }
 
-  // Initialize deployment session ID for batch deployments
-  if (!deploymentSessionId) {
-    deploymentSessionId = process.env.DEPLOYMENT_SESSION_ID || `session-${Date.now()}`;
-    console.log("Deployment session ID:", deploymentSessionId);
-  }
+    // Read all JSON files from the directory
+    const files = fs.readdirSync(canonicalDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => ({
+        name: file.replace('.json', ''),
+        path: path.join(canonicalDir, file)
+      }));
 
-  // Set GitHub Actions output
-    if (isCI() && process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployer_address=${account.address}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `network=${networkName}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `chain_id=${chainId}\n`);
-  }
+    if (files.length === 0) {
+      console.error("No JSON files found in the directory");
+      process.exit(1);
+    }
 
-  // Read all JSON files from the directory
-  const files = fs.readdirSync(canonicalDir)
-    .filter(file => file.endsWith('.json'))
-    .map(file => ({
-      name: file.replace('.json', ''),
-      path: path.join(canonicalDir, file)
-    }));
+    console.log(`\nFound ${files.length} contract(s) to deploy:`);
+    files.forEach(file => console.log(`  - ${file.name}`));
 
-  if (files.length === 0) {
-    console.error("No JSON files found in the directory");
-    process.exit(1);
-  }
+    // Sort files according to deployment order
+    const sortedFiles = files.sort((a, b) => {
+      const indexA = DEPLOYMENT_ORDER.indexOf(a.name);
+      const indexB = DEPLOYMENT_ORDER.indexOf(b.name);
+      // If not in order list, put at end
+      if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
 
-  console.log(`\nFound ${files.length} contract(s) to deploy:`);
-  files.forEach(file => console.log(`  - ${file.name}`));
+    console.log("\nDeployment order:");
+    sortedFiles.forEach((file, index) => {
+      console.log(`  ${index + 1}. ${file.name}`);
+    });
 
-  // Sort files according to deployment order
-  const sortedFiles = files.sort((a, b) => {
-    const indexA = DEPLOYMENT_ORDER.indexOf(a.name);
-    const indexB = DEPLOYMENT_ORDER.indexOf(b.name);
-    // If not in order list, put at end
-    if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
-    if (indexA === -1) return 1;
-    if (indexB === -1) return -1;
-    return indexA - indexB;
-  });
+    // Deploy contracts sequentially
+    const results: DeploymentResult[] = [];
+    let successCount = 0;
+    let failureCount = 0;
 
-  console.log("\nDeployment order:");
-  sortedFiles.forEach((file, index) => {
-    console.log(`  ${index + 1}. ${file.name}`);
-  });
+    for (const file of sortedFiles) {
+      try {
+        const deploymentData: DeploymentData = JSON.parse(
+          fs.readFileSync(file.path, "utf-8")
+        );
 
-  // Deploy contracts sequentially
-  const results: DeploymentResult[] = [];
-  let successCount = 0;
-  let failureCount = 0;
+        if (!deploymentData.to || !deploymentData.data) {
+          console.error(`\n✗ Invalid deployment data in ${file.name}: missing 'to' or 'data' field`);
+          results.push({
+            contractName: file.name,
+            success: false,
+            error: "Invalid deployment data: missing 'to' or 'data' field",
+          });
+          failureCount++;
+          continue;
+        }
 
-  for (const file of sortedFiles) {
-    try {
-      const deploymentData: DeploymentData = JSON.parse(
-        fs.readFileSync(file.path, "utf-8")
-      );
+        const result = await deployContract(client, publicClient, deploymentData, file.name, account, customChain, networkName, chainId);
+        results.push(result);
 
-      if (!deploymentData.to || !deploymentData.data) {
-        console.error(`\n✗ Invalid deployment data in ${file.name}: missing 'to' or 'data' field`);
+        if (result.success) {
+          successCount++;
+        } else {
+          failureCount++;
+          // Optionally stop on first failure (uncomment if needed)
+          // console.error(`\n✗ Stopping deployment due to failure`);
+          // break;
+        }
+
+        // Small delay between deployments to avoid nonce issues
+        await wait(DEPLOYMENT_CONFIG.delays.betweenDeployments);
+
+      } catch (error: unknown) {
+        const errorMessage = formatError(error);
+        console.error(`\n✗ Failed to read or process ${file.name}:`, errorMessage);
         results.push({
           contractName: file.name,
           success: false,
-          error: "Invalid deployment data: missing 'to' or 'data' field",
+          error: errorMessage,
         });
         failureCount++;
-        continue;
       }
-
-      const result = await deployContract(client, publicClient, deploymentData, file.name, account, customChain, networkName, chainId);
-      results.push(result);
-
-      if (result.success) {
-        successCount++;
-      } else {
-        failureCount++;
-        // Optionally stop on first failure (uncomment if needed)
-        // console.error(`\n✗ Stopping deployment due to failure`);
-        // break;
-      }
-
-      // Small delay between deployments to avoid nonce issues
-      await wait(DEPLOYMENT_CONFIG.delays.betweenDeployments);
-
-    } catch (error: unknown) {
-      const errorMessage = formatError(error);
-      console.error(`\n✗ Failed to read or process ${file.name}:`, errorMessage);
-      results.push({
-        contractName: file.name,
-        success: false,
-        error: errorMessage,
-      });
-      failureCount++;
     }
-  }
 
-  // Print summary
-  console.log("\n" + "=".repeat(60));
-  console.log("Deployment Summary");
-  console.log("=".repeat(60));
-  console.log(`Total contracts: ${results.length}`);
-  console.log(`Successful: ${successCount}`);
-  console.log(`Failed: ${failureCount}`);
+    // Print summary
+    console.log("\n" + "=".repeat(60));
+    console.log("Deployment Summary");
+    console.log("=".repeat(60));
+    console.log(`Total contracts: ${results.length}`);
+    console.log(`Successful: ${successCount}`);
+    console.log(`Failed: ${failureCount}`);
 
-  console.log("\nDetailed Results:");
-  results.forEach((result, index) => {
-    const status = result.success ? "✓" : "✗";
-    console.log(`\n${index + 1}. ${status} ${result.contractName}`);
-    if (result.success) {
-      if (result.txHash) console.log(`   TX Hash: ${result.txHash}`);
-      if (result.contractAddress) console.log(`   Address: ${result.contractAddress}`);
-      if (result.expectedAddress && result.contractAddress) {
-        if (result.contractAddress.toLowerCase() === result.expectedAddress.toLowerCase()) {
-          console.log(`   ✓ Address matches expected`);
-        } else {
-          console.log(`   ⚠ Expected: ${result.expectedAddress}`);
-        }
-      }
-      if (result.blockNumber) console.log(`   Block: ${result.blockNumber}`);
-      if (result.gasUsed) console.log(`   Gas Used: ${result.gasUsed}`);
-    } else {
-      console.log(`   Error: ${result.error || "Unknown error"}`);
-    }
-  });
-
-  // Set GitHub Actions output for summary
-    if (isCI() && process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `total_contracts=${results.length}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `successful=${successCount}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `failed=${failureCount}\n`);
-    
-    // Output individual contract results
+    console.log("\nDetailed Results:");
     results.forEach((result, index) => {
-      const prefix = `contract_${index + 1}_`;
-      fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}name=${result.contractName}\n`);
-      fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}success=${result.success}\n`);
-      if (result.txHash) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}tx_hash=${result.txHash}\n`);
-      }
-      if (result.blockNumber) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}block_number=${result.blockNumber.toString()}\n`);
-      }
-      if (result.contractAddress) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}address=${result.contractAddress}\n`);
-      }
-      if (result.gasUsed) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}gas_used=${result.gasUsed.toString()}\n`);
-      }
-      if (result.error) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}error=${result.error}\n`);
+      const status = result.success ? "✓" : "✗";
+      console.log(`\n${index + 1}. ${status} ${result.contractName}`);
+      if (result.success) {
+        if (result.txHash) console.log(`   TX Hash: ${result.txHash}`);
+        if (result.contractAddress) console.log(`   Address: ${result.contractAddress}`);
+        if (result.expectedAddress && result.contractAddress) {
+          if (result.contractAddress.toLowerCase() === result.expectedAddress.toLowerCase()) {
+            console.log(`   ✓ Address matches expected`);
+          } else {
+            console.log(`   ⚠ Expected: ${result.expectedAddress}`);
+          }
+        }
+        if (result.blockNumber) console.log(`   Block: ${result.blockNumber}`);
+        if (result.gasUsed) console.log(`   Gas Used: ${result.gasUsed}`);
+      } else {
+        console.log(`   Error: ${result.error || "Unknown error"}`);
       }
     });
-  }
 
-  // Create GitHub Actions summary file
-  const finalChainId = await publicClient.getChainId();
-  createGitHubActionsSummary(results, networkName, finalChainId);
+    // Set GitHub Actions output for summary
+    if (isCI() && process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `total_contracts=${results.length}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `successful=${successCount}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `failed=${failureCount}\n`);
+      
+      // Output individual contract results
+      results.forEach((result, index) => {
+        const prefix = `contract_${index + 1}_`;
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}name=${result.contractName}\n`);
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}success=${result.success}\n`);
+        if (result.txHash) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}tx_hash=${result.txHash}\n`);
+        }
+        if (result.blockNumber) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}block_number=${result.blockNumber.toString()}\n`);
+        }
+        if (result.contractAddress) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}address=${result.contractAddress}\n`);
+        }
+        if (result.gasUsed) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}gas_used=${result.gasUsed.toString()}\n`);
+        }
+        if (result.error) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}error=${result.error}\n`);
+        }
+      });
+    }
 
-  // Exit with error code if any deployments failed
-  if (failureCount > 0) {
+    // Create GitHub Actions summary file
+    const finalChainId = await publicClient.getChainId();
+    createGitHubActionsSummary(results, networkName, finalChainId);
+
+    // Exit with error code if any deployments failed
+    if (failureCount > 0) {
+      process.exit(1);
+    }
+  } catch (error: unknown) {
+    console.error("\n✗ Fatal error:");
+    console.error(formatError(error));
+
+    if (error instanceof ConfigurationError || error instanceof ValidationError) {
+      console.error("\nPlease check your environment variables and configuration.");
+    }
+
+    if (isCI() && process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `fatal_error=true\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `error=${formatError(error).replace(/\n/g, ' ')}\n`);
+    }
+
     process.exit(1);
   }
 }

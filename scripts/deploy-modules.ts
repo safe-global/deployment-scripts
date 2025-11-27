@@ -248,8 +248,8 @@ async function deployContract(
         } else {
           console.log("No bytecode found at expected address. Proceeding with deployment...");
         }
-      } catch (error: any) {
-        console.warn(`⚠ Could not check if contract exists: ${error.message}`);
+      } catch (error: unknown) {
+        console.warn(`⚠ Could not check if contract exists: ${formatError(error)}`);
         console.log("Proceeding with deployment...");
       }
     } else {
@@ -317,8 +317,8 @@ async function deployContract(
             result.contractAddress = deploymentData.expectedAddress;
             result.success = true; // Still consider it success since contract exists (or should exist)
           }
-        } catch (error: any) {
-          console.warn(`⚠ Could not verify contract deployment: ${error.message}`);
+        } catch (error: unknown) {
+          console.warn(`⚠ Could not verify contract deployment: ${formatError(error)}`);
           // Still use expected address as contract address
           result.contractAddress = deploymentData.expectedAddress;
           console.log("Deployed contract address:", deploymentData.expectedAddress);
@@ -396,18 +396,18 @@ async function main() {
     // Validate RPC URL format
     validateRpcUrl(rpcUrl);
 
-  // Path to modules directory
-  const modulesDir = path.join(
-    process.cwd(),
-    "contracts",
-    "deployement-data",
-    "module"
-  );
+    // Path to modules directory
+    const modulesDir = path.join(
+      process.cwd(),
+      "contracts",
+      "deployement-data",
+      "module"
+    );
 
-  if (!fs.existsSync(modulesDir)) {
-    console.error(`Directory not found: ${modulesDir}`);
-    process.exit(1);
-  }
+    if (!fs.existsSync(modulesDir)) {
+      console.error(`Directory not found: ${modulesDir}`);
+      process.exit(1);
+    }
 
     // Get deployment account (validates private key)
     const account = getDeploymentAccount();
@@ -432,138 +432,138 @@ async function main() {
     const client = createDeploymentWalletClient(rpcUrl, customChain);
     const publicClient = createDeploymentPublicClient(rpcUrl, customChain);
 
-  // Get and display ETH balance
-  try {
-    const balance = await publicClient.getBalance({ address: account.address });
-    const balanceInEth = formatEther(balance);
-    console.log("ETH Balance:", balanceInEth, "ETH");
-    console.log("ETH Balance (wei):", balance.toString());
-    
-    // Set GitHub Actions output
-    if (isCI() && process.env.GITHUB_OUTPUT) {
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
-    }
-  } catch (error: any) {
-    console.warn("⚠ Could not fetch ETH balance:", error.message);
-  }
-
-  // Load module deployment data
-  const moduleDeployments: { [key: string]: DeploymentData } = {};
-
-  for (const moduleName of MODULE_DEPLOYMENT_ORDER) {
-    const modulePath = path.join(modulesDir, moduleName);
-    
-    if (!fs.existsSync(modulePath)) {
-      console.warn(`⚠ Module directory not found: ${modulePath}`);
-      continue;
-    }
-
-    // Find JSON files in the module directory
-    const files = fs.readdirSync(modulePath);
-    const jsonFiles = files.filter(f => f.endsWith('.json'));
-
-    if (jsonFiles.length === 0) {
-      console.warn(`⚠ No JSON files found in ${modulePath}`);
-      continue;
-    }
-
-    // Use the first JSON file found (assuming one version per module)
-    const jsonFile = path.join(modulePath, jsonFiles[0]);
-    const moduleData = JSON.parse(fs.readFileSync(jsonFile, 'utf-8')) as DeploymentData;
-    
-    // Use module name and version as contract name
-    const version = jsonFiles[0].replace('.json', '');
-    const contractName = `${moduleName}-${version}`;
-    
-    moduleDeployments[contractName] = moduleData;
-    console.log(`\n✓ Loaded ${contractName}:`);
-    console.log(`  Factory: ${moduleData.to}`);
-    if (moduleData.expectedAddress) {
-      console.log(`  Expected address: ${moduleData.expectedAddress}`);
-    }
-  }
-
-  if (Object.keys(moduleDeployments).length === 0) {
-    console.error("No module deployment data found!");
-    process.exit(1);
-  }
-
-  console.log(`\n📦 Found ${Object.keys(moduleDeployments).length} module(s) to deploy`);
-
-  // Deploy modules in order
-  const results: DeploymentResult[] = [];
-  
-  for (const contractName of Object.keys(moduleDeployments)) {
-    const deploymentData = moduleDeployments[contractName];
-    const result = await deployContract(
-      client,
-      publicClient,
-      deploymentData,
-      contractName,
-      account,
-      customChain,
-      networkName,
-      chainId
-    );
-    results.push(result);
-
-    // Small delay between deployments
-    if (result.success) {
-      await wait(DEPLOYMENT_CONFIG.delays.betweenDeployments);
-    }
-  }
-
-  // Print summary
-  console.log("\n" + "=".repeat(60));
-  console.log("Deployment Summary");
-  console.log("=".repeat(60));
-  console.log(`Total modules: ${results.length}`);
-  console.log(`Successful: ${results.filter(r => r.success).length}`);
-  console.log(`Failed: ${results.filter(r => !r.success).length}`);
-
-  results.forEach(result => {
-    if (result.success) {
-      console.log(`\n✓ ${result.contractName}:`);
-      console.log(`  Address: ${result.contractAddress || result.expectedAddress || 'N/A'}`);
-      console.log(`  TX Hash: ${result.txHash}`);
-      console.log(`  Block: ${result.blockNumber?.toString() || 'N/A'}`);
-    } else {
-      console.log(`\n✗ ${result.contractName}:`);
-      console.log(`  Error: ${result.error || 'Unknown error'}`);
-    }
-  });
-
-  // Create GitHub Actions summary
-  createGitHubActionsSummary(results, networkName, chainId);
-
-    // Set GitHub Actions outputs
-  if (isCI() && process.env.GITHUB_OUTPUT) {
-    const successful = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_successful=${successful === results.length}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_successful_count=${successful}\n`);
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_failed_count=${failed}\n`);
-    
-    // Add individual module results
-    results.forEach((result, index) => {
-      const prefix = `module_${index + 1}_`;
-      fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}name=${result.contractName}\n`);
-      fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}success=${result.success}\n`);
-      if (result.txHash) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}tx_hash=${result.txHash}\n`);
+    // Get and display ETH balance
+    try {
+      const balance = await publicClient.getBalance({ address: account.address });
+      const balanceInEth = formatEther(balance);
+      console.log("ETH Balance:", balanceInEth, "ETH");
+      console.log("ETH Balance (wei):", balance.toString());
+      
+      // Set GitHub Actions output
+      if (isCI() && process.env.GITHUB_OUTPUT) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
       }
-      if (result.blockNumber) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}block_number=${result.blockNumber.toString()}\n`);
+    } catch (error: unknown) {
+      console.warn("⚠ Could not fetch ETH balance:", formatError(error));
+    }
+
+    // Load module deployment data
+    const moduleDeployments: { [key: string]: DeploymentData } = {};
+
+    for (const moduleName of MODULE_DEPLOYMENT_ORDER) {
+      const modulePath = path.join(modulesDir, moduleName);
+      
+      if (!fs.existsSync(modulePath)) {
+        console.warn(`⚠ Module directory not found: ${modulePath}`);
+        continue;
       }
-      if (result.contractAddress) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}address=${result.contractAddress}\n`);
+
+      // Find JSON files in the module directory
+      const files = fs.readdirSync(modulePath);
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+
+      if (jsonFiles.length === 0) {
+        console.warn(`⚠ No JSON files found in ${modulePath}`);
+        continue;
       }
-      if (result.error) {
-        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}error=${result.error.replace(/\n/g, ' ')}\n`);
+
+      // Use the first JSON file found (assuming one version per module)
+      const jsonFile = path.join(modulePath, jsonFiles[0]);
+      const moduleData = JSON.parse(fs.readFileSync(jsonFile, 'utf-8')) as DeploymentData;
+      
+      // Use module name and version as contract name
+      const version = jsonFiles[0].replace('.json', '');
+      const contractName = `${moduleName}-${version}`;
+      
+      moduleDeployments[contractName] = moduleData;
+      console.log(`\n✓ Loaded ${contractName}:`);
+      console.log(`  Factory: ${moduleData.to}`);
+      if (moduleData.expectedAddress) {
+        console.log(`  Expected address: ${moduleData.expectedAddress}`);
+      }
+    }
+
+    if (Object.keys(moduleDeployments).length === 0) {
+      console.error("No module deployment data found!");
+      process.exit(1);
+    }
+
+    console.log(`\n📦 Found ${Object.keys(moduleDeployments).length} module(s) to deploy`);
+
+    // Deploy modules in order
+    const results: DeploymentResult[] = [];
+    
+    for (const contractName of Object.keys(moduleDeployments)) {
+      const deploymentData = moduleDeployments[contractName];
+      const result = await deployContract(
+        client,
+        publicClient,
+        deploymentData,
+        contractName,
+        account,
+        customChain,
+        networkName,
+        chainId
+      );
+      results.push(result);
+
+      // Small delay between deployments
+      if (result.success) {
+        await wait(DEPLOYMENT_CONFIG.delays.betweenDeployments);
+      }
+    }
+
+    // Print summary
+    console.log("\n" + "=".repeat(60));
+    console.log("Deployment Summary");
+    console.log("=".repeat(60));
+    console.log(`Total modules: ${results.length}`);
+    console.log(`Successful: ${results.filter(r => r.success).length}`);
+    console.log(`Failed: ${results.filter(r => !r.success).length}`);
+
+    results.forEach(result => {
+      if (result.success) {
+        console.log(`\n✓ ${result.contractName}:`);
+        console.log(`  Address: ${result.contractAddress || result.expectedAddress || 'N/A'}`);
+        console.log(`  TX Hash: ${result.txHash}`);
+        console.log(`  Block: ${result.blockNumber?.toString() || 'N/A'}`);
+      } else {
+        console.log(`\n✗ ${result.contractName}:`);
+        console.log(`  Error: ${result.error || 'Unknown error'}`);
       }
     });
-  }
+
+    // Create GitHub Actions summary
+    createGitHubActionsSummary(results, networkName, chainId);
+
+    // Set GitHub Actions outputs
+    if (isCI() && process.env.GITHUB_OUTPUT) {
+      const successful = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_successful=${successful === results.length}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_successful_count=${successful}\n`);
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_failed_count=${failed}\n`);
+      
+      // Add individual module results
+      results.forEach((result, index) => {
+        const prefix = `module_${index + 1}_`;
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}name=${result.contractName}\n`);
+        fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}success=${result.success}\n`);
+        if (result.txHash) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}tx_hash=${result.txHash}\n`);
+        }
+        if (result.blockNumber) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}block_number=${result.blockNumber.toString()}\n`);
+        }
+        if (result.contractAddress) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}address=${result.contractAddress}\n`);
+        }
+        if (result.error) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT!, `${prefix}error=${result.error.replace(/\n/g, ' ')}\n`);
+        }
+      });
+    }
 
     // Exit with error code if any deployment failed
     if (results.some(r => !r.success)) {

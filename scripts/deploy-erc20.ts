@@ -203,19 +203,20 @@ async function deployERC20(
                 args: [account.address],
               });
               console.log(`Balance of ${account.address}:`, balance.toString());
-            } catch (error: any) {
-              console.warn("⚠ Could not read balance:", error.message);
+            } catch (error: unknown) {
+              console.warn("⚠ Could not read balance:", formatError(error));
             }
           } else {
             console.warn("⚠ Mint transaction failed");
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Check if error is because mint function doesn't exist
-          if (error.message?.includes("Function") && error.message?.includes("not found")) {
+          const errorMsg = formatError(error);
+          if (errorMsg.includes("Function") && errorMsg.includes("not found")) {
             console.warn(`\n⚠ Mint function not found in contract. Skipping mint.`);
             console.warn(`This is normal if the ERC20 contract doesn't have a mint function.`);
           } else {
-            console.warn(`\n⚠ Failed to mint tokens:`, error.message || String(error));
+            console.warn(`\n⚠ Failed to mint tokens:`, errorMsg);
             console.warn(`Continuing without mint...`);
           }
         }
@@ -373,8 +374,8 @@ async function main() {
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
     }
-  } catch (error: any) {
-    console.warn("⚠ Could not fetch ETH balance:", error.message);
+  } catch (error: unknown) {
+    console.warn("⚠ Could not fetch ETH balance:", formatError(error));
   }
 
     // Set GitHub Actions output

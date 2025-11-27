@@ -254,8 +254,8 @@ async function deployContract(
         } else {
           console.log("No bytecode found at expected address. Proceeding with deployment...");
         }
-      } catch (error: any) {
-        console.warn(`⚠ Could not check if contract exists: ${error.message}`);
+      } catch (error: unknown) {
+        console.warn(`⚠ Could not check if contract exists: ${formatError(error)}`);
         console.log("Proceeding with deployment...");
       }
     } else {
@@ -323,8 +323,8 @@ async function deployContract(
             result.contractAddress = deploymentData.expectedAddress;
             result.success = true; // Still consider it success since contract exists (or should exist)
           }
-        } catch (error: any) {
-          console.warn(`⚠ Could not verify contract deployment: ${error.message}`);
+        } catch (error: unknown) {
+          console.warn(`⚠ Could not verify contract deployment: ${formatError(error)}`);
           // Still use expected address as contract address
           result.contractAddress = deploymentData.expectedAddress;
           console.log("Deployed contract address:", deploymentData.expectedAddress);
@@ -451,8 +451,8 @@ async function main() {
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_wei=${balance.toString()}\n`);
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `eth_balance_eth=${balanceInEth}\n`);
     }
-  } catch (error: any) {
-    console.warn("⚠ Could not fetch ETH balance:", error.message);
+  } catch (error: unknown) {
+    console.warn("⚠ Could not fetch ETH balance:", formatError(error));
   }
 
   // Initialize deployment session ID for batch deployments
@@ -462,7 +462,7 @@ async function main() {
   }
 
   // Set GitHub Actions output
-  if (isCI && process.env.GITHUB_OUTPUT) {
+  if (isCI() && process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployer_address=${account.address}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `network=${networkName}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `chain_id=${chainId}\n`);
@@ -579,7 +579,7 @@ async function main() {
   });
 
   // Set GitHub Actions output for summary
-  if (isCI && process.env.GITHUB_OUTPUT) {
+  if (isCI() && process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `total_contracts=${results.length}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `successful=${successCount}\n`);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `failed=${failureCount}\n`);

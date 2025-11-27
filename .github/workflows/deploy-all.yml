@@ -561,3 +561,80 @@ jobs:
             echo "**No registry updates triggered** (no successful Smart Account deployments)" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Create GitHub issues for chain addition (1.3.0/1.4.1)
+        if: success() || failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.SAFE_ETH_PY_TOKEN }}
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+        run: |
+          # Skip if no token is configured
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "::warning::SAFE_ETH_PY_TOKEN not configured. Skipping GitHub issue creation."
+            exit 0
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 GitHub Issues (safe-eth-py)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          ISSUES_CREATED=0
+          
+          create_issue() {
+            local VERSION=$1
+            local STEP_OUTCOME=$2
+            local SUMMARY_PATTERN=$3
+            
+            if [ "$STEP_OUTCOME" != "success" ]; then
+              echo "⏭️ Skipping issue for $VERSION (deployment not successful: $STEP_OUTCOME)"
+              return
+            fi
+            
+            # Find the summary file for this deployment
+            SUMMARY_FILE=$(find deployments -name "$SUMMARY_PATTERN" -type f 2>/dev/null | head -1)
+            
+            if [ -z "$SUMMARY_FILE" ] || [ ! -f "$SUMMARY_FILE" ]; then
+              echo "::warning::No summary file found for $VERSION. Skipping issue creation."
+              return
+            fi
+            
+            echo "📝 Creating GitHub issue for $VERSION..."
+            export SAFE_VERSION="$VERSION"
+            
+            if pnpm exec tsx scripts/create-chain-addition-issue.ts "$SUMMARY_FILE" safe-global safe-eth-py; then
+              echo "- ✅ Created issue for **$VERSION**" >> $GITHUB_STEP_SUMMARY
+              ISSUES_CREATED=$((ISSUES_CREATED + 1))
+            else
+              echo "- ❌ Failed to create issue for **$VERSION**" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Small delay to avoid rate limiting
+            sleep 2
+          }
+          
+          # Create issues for 1.3.0 canonical, 1.3.0-155, and 1.4.1 (NOT 1.5.0)
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0 }}" == "true" ]; then
+            create_issue "1.3.0" "${{ steps.deploy_1_3_0.outcome }}" "github-actions-summary-*-latest.json"
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0_155 }}" == "true" ]; then
+            create_issue "1.3.0" "${{ steps.deploy_1_3_0_155.outcome }}" "github-actions-summary-*-latest.json"
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_4_1 }}" == "true" ]; then
+            create_issue "1.4.1" "${{ steps.deploy_1_4_1.outcome }}" "github-actions-summary-*-latest.json"
+          fi
+          
+          # Note: 1.5.0 uses update-registry workflow instead
+          if [ "${{ steps.parse_targets.outputs.deploy_1_5_0 }}" == "true" ] && [ "${{ steps.deploy_1_5_0.outcome }}" == "success" ]; then
+            echo "- ⏭️ Skipped **v1.5.0** (uses update-registry workflow instead)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ $ISSUES_CREATED -gt 0 ]; then
+            echo "**Total**: $ISSUES_CREATED issue(s) created" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "View issues: https://github.com/safe-global/safe-eth-py/issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**No issues created** (no successful 1.3.0/1.4.1 deployments)" >> $GITHUB_STEP_SUMMARY
+          fi
+

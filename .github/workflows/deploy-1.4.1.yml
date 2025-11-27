@@ -262,6 +262,39 @@ jobs:
             fi
           fi
 
+      - name: Create GitHub issue for chain addition
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.SAFE_ETH_PY_TOKEN }}
+          SAFE_VERSION: "1.4.1"
+          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+        run: |
+          # Skip if no token is configured
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "::warning::SAFE_ETH_PY_TOKEN not configured. Skipping GitHub issue creation."
+            exit 0
+          fi
+          
+          # Find the deployment summary file
+          SUMMARY_FILE=$(find deployments -name "github-actions-summary-*-latest.json" -type f | head -1)
+          
+          if [ -z "$SUMMARY_FILE" ] || [ ! -f "$SUMMARY_FILE" ]; then
+            echo "::warning::No deployment summary file found. Skipping GitHub issue creation."
+            exit 0
+          fi
+          
+          echo "📝 Creating GitHub issue for chain addition..."
+          echo "   Summary file: $SUMMARY_FILE"
+          echo "   Version: $SAFE_VERSION"
+          
+          # Run the create-chain-addition-issue script
+          pnpm exec tsx scripts/create-chain-addition-issue.ts "$SUMMARY_FILE" safe-global safe-eth-py
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 GitHub Issue" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Created chain addition issue in [safe-global/safe-eth-py](https://github.com/safe-global/safe-eth-py/issues)" >> $GITHUB_STEP_SUMMARY
+
       - name: Upload deployment summary for other workflows
         if: always()
         uses: actions/upload-artifact@v4

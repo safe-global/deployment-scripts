@@ -17,7 +17,7 @@ on:
         type: string
         default: 'custom'
       deploy_targets:
-        description: 'Comma-separated list of targets to deploy (e.g., "1.5.0,modules,erc20,erc721" or "all"). Options: 1.3.0, 1.4.1, 1.5.0, modules, erc20, erc721, all'
+        description: 'Comma-separated list of targets to deploy (e.g., "1.5.0,modules,erc20,erc721" or "all"). Options: 1.3.0, 1.3.0-155, 1.4.1, 1.5.0, modules, erc20, erc721, all'
         required: false
         type: string
         default: ''
@@ -96,6 +96,7 @@ jobs:
           if [ -z "$DEPLOY_TARGETS" ] || [ "$DEPLOY_TARGETS" = "" ]; then
             echo "::notice::No deployment targets specified, skipping all deployments"
             echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
+            echo "deploy_1_3_0_155=false" >> $GITHUB_OUTPUT
             echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
             echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
             echo "deploy_modules=false" >> $GITHUB_OUTPUT
@@ -105,7 +106,7 @@ jobs:
           fi
           
           # Valid target names
-          VALID_TARGETS=("1.3.0" "1.4.1" "1.5.0" "modules" "erc20" "erc721" "all")
+          VALID_TARGETS=("1.3.0" "1.3.0-155" "1.4.1" "1.5.0" "modules" "erc20" "erc721" "all")
           
           # Check for "all" keyword
           if echo "$DEPLOY_TARGETS" | grep -qE "^all$|^all,|,all$|,all,"; then
@@ -115,6 +116,7 @@ jobs:
             fi
             echo "::notice::Deploying all targets"
             echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT
+            echo "deploy_1_3_0_155=true" >> $GITHUB_OUTPUT
             echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT
             echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT
             echo "deploy_modules=true" >> $GITHUB_OUTPUT
@@ -152,6 +154,7 @@ jobs:
             
             # Set outputs for each target
             echo "$DEPLOY_TARGETS" | grep -qE "^1\.3\.0$|^1\.3\.0,|,1\.3\.0$|,1\.3\.0," && echo "deploy_1_3_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_3_0=false" >> $GITHUB_OUTPUT
+            echo "$DEPLOY_TARGETS" | grep -qE "^1\.3\.0-155$|^1\.3\.0-155,|,1\.3\.0-155$|,1\.3\.0-155," && echo "deploy_1_3_0_155=true" >> $GITHUB_OUTPUT || echo "deploy_1_3_0_155=false" >> $GITHUB_OUTPUT
             echo "$DEPLOY_TARGETS" | grep -qE "^1\.4\.1$|^1\.4\.1,|,1\.4\.1$|,1\.4\.1," && echo "deploy_1_4_1=true" >> $GITHUB_OUTPUT || echo "deploy_1_4_1=false" >> $GITHUB_OUTPUT
             echo "$DEPLOY_TARGETS" | grep -qE "^1\.5\.0$|^1\.5\.0,|,1\.5\.0$|,1\.5\.0," && echo "deploy_1_5_0=true" >> $GITHUB_OUTPUT || echo "deploy_1_5_0=false" >> $GITHUB_OUTPUT
             echo "$DEPLOY_TARGETS" | grep -qE "^modules$|^modules,|,modules$|,modules," && echo "deploy_modules=true" >> $GITHUB_OUTPUT || echo "deploy_modules=false" >> $GITHUB_OUTPUT
@@ -171,6 +174,15 @@ jobs:
           echo "::notice::Deploying Safe 1.3.0 Canonical contracts..."
           pnpm deploy-1.3.0-canonical --network "${NETWORK:-custom}" || exit 1
           echo "deploy_1_3_0_status=success" >> $GITHUB_OUTPUT
+
+      - name: Deploy Safe 1.3.0 EIP-155
+        if: steps.parse_targets.outputs.deploy_1_3_0_155 == 'true'
+        id: deploy_1_3_0_155
+        continue-on-error: true
+        run: |
+          echo "::notice::Deploying Safe 1.3.0 EIP-155 contracts..."
+          pnpm deploy-1.3.0-155 --network "${NETWORK:-custom}" || exit 1
+          echo "deploy_1_3_0_155_status=success" >> $GITHUB_OUTPUT
 
       - name: Deploy Safe 1.4.1
         if: steps.parse_targets.outputs.deploy_1_4_1 == 'true'
@@ -224,129 +236,170 @@ jobs:
       - name: Display deployment summary
         if: always()
         run: |
-          echo "## All Contracts Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 All Contracts Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Network**: ${{ github.event.inputs.network_name || 'custom' }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Network info
+          echo "### Network Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Network** | ${{ github.event.inputs.network_name || 'custom' }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to get chain ID from any summary file
+          CHAIN_ID=""
+          if [ -d "deployments" ]; then
+            FIRST_SUMMARY=$(find deployments -name "github-actions-summary-*-latest.json" -type f 2>/dev/null | head -1)
+            if [ -n "$FIRST_SUMMARY" ] && [ -f "$FIRST_SUMMARY" ] && command -v jq &> /dev/null; then
+              CHAIN_ID=$(jq -r '.chainId // ""' "$FIRST_SUMMARY")
+              if [ -n "$CHAIN_ID" ] && [ "$CHAIN_ID" != "null" ]; then
+                echo "| **Chain ID** | $CHAIN_ID |" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          fi
+          
           if [ -n "${{ github.event.inputs.block_explorer_url }}" ]; then
-            echo "- **Block Explorer**: ${{ github.event.inputs.block_explorer_url }}" >> $GITHUB_STEP_SUMMARY
+            echo "| **Block Explorer** | ${{ github.event.inputs.block_explorer_url }} |" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Track deployment statuses
-          DEPLOYMENTS=()
-          STATUSES=()
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0 }}" == "true" ]; then
-            DEPLOYMENTS+=("Safe 1.3.0 Canonical")
-            STATUSES+=("${{ steps.deploy_1_3_0.outcome }}")
-          fi
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_1_4_1 }}" == "true" ]; then
-            DEPLOYMENTS+=("Safe 1.4.1")
-            STATUSES+=("${{ steps.deploy_1_4_1.outcome }}")
-          fi
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_1_5_0 }}" == "true" ]; then
-            DEPLOYMENTS+=("Safe 1.5.0")
-            STATUSES+=("${{ steps.deploy_1_5_0.outcome }}")
-          fi
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_modules }}" == "true" ]; then
-            DEPLOYMENTS+=("Safe Modules")
-            STATUSES+=("${{ steps.deploy_modules.outcome }}")
-          fi
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_erc20 }}" == "true" ]; then
-            DEPLOYMENTS+=("ERC20 Token")
-            STATUSES+=("${{ steps.deploy_erc20.outcome }}")
-          fi
-          
-          if [ "${{ steps.parse_targets.outputs.deploy_erc721 }}" == "true" ]; then
-            DEPLOYMENTS+=("ERC721 NFT")
-            STATUSES+=("${{ steps.deploy_erc721.outcome }}")
-          fi
-          
-          echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+          # Deployment targets status
+          echo "### Deployment Targets" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
           
           SUCCESS_COUNT=0
           FAILED_COUNT=0
           SKIPPED_COUNT=0
+          TOTAL_COUNT=0
           
-          for i in "${!DEPLOYMENTS[@]}"; do
-            DEPLOYMENT="${DEPLOYMENTS[$i]}"
-            STATUS="${STATUSES[$i]}"
-            
-            case "$STATUS" in
-              "success")
-                echo "- ✅ **$DEPLOYMENT**: Success" >> $GITHUB_STEP_SUMMARY
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-                ;;
-              "failure")
-                echo "- ❌ **$DEPLOYMENT**: Failed" >> $GITHUB_STEP_SUMMARY
-                FAILED_COUNT=$((FAILED_COUNT + 1))
-                ;;
-              "skipped")
-                echo "- ⏭️ **$DEPLOYMENT**: Skipped" >> $GITHUB_STEP_SUMMARY
-                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-                ;;
-              *)
-                echo "- ⚠️ **$DEPLOYMENT**: Unknown status ($STATUS)" >> $GITHUB_STEP_SUMMARY
-                ;;
+          declare -A TARGET_STATUS
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_1_3_0.outcome }}" in
+              "success") echo "| Safe 1.3.0 Canonical | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| Safe 1.3.0 Canonical | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| Safe 1.3.0 Canonical | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| Safe 1.3.0 Canonical | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
             esac
-          done
+          fi
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total**: ${#DEPLOYMENTS[@]}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Successful**: $SUCCESS_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "- **Failed**: $FAILED_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "- **Skipped**: $SKIPPED_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.parse_targets.outputs.deploy_1_3_0_155 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_1_3_0_155.outcome }}" in
+              "success") echo "| Safe 1.3.0 EIP-155 | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| Safe 1.3.0 EIP-155 | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| Safe 1.3.0 EIP-155 | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| Safe 1.3.0 EIP-155 | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          fi
           
-          # Try to read detailed results from summary files
-          if [ -d "deployments" ]; then
-            echo "### Detailed Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Find all latest summary files
-            SUMMARY_FILES=$(find deployments -name "github-actions-summary-*-latest.json" -type f 2>/dev/null || true)
-            
-            if [ -n "$SUMMARY_FILES" ]; then
-              for SUMMARY_FILE in $SUMMARY_FILES; do
-                if [ -f "$SUMMARY_FILE" ] && command -v jq &> /dev/null; then
-                  CONTRACT_NAME=$(jq -r '.deployments[0].contractName // "Unknown"' "$SUMMARY_FILE")
-                  SUCCESS=$(jq -r '.deployments[0].success // false' "$SUMMARY_FILE")
-                  TX_HASH=$(jq -r '.deployments[0].txHash // "N/A"' "$SUMMARY_FILE")
-                  ADDRESS=$(jq -r '.deployments[0].contractAddress // "N/A"' "$SUMMARY_FILE")
-                  BLOCK=$(jq -r '.deployments[0].blockNumber // "N/A"' "$SUMMARY_FILE")
-                  
-                  if [ "$SUCCESS" = "true" ]; then
-                    STATUS_ICON="✅"
-                    DETAILS=""
-                    if [ "$TX_HASH" != "null" ] && [ "$TX_HASH" != "N/A" ] && [ -n "$TX_HASH" ]; then
-                      DETAILS="$DETAILS TX: \`${TX_HASH:0:10}...\`"
-                    fi
-                    if [ "$BLOCK" != "null" ] && [ "$BLOCK" != "N/A" ] && [ -n "$BLOCK" ]; then
-                      DETAILS="$DETAILS Block: $BLOCK"
-                    fi
-                    if [ "$ADDRESS" != "null" ] && [ "$ADDRESS" != "N/A" ] && [ -n "$ADDRESS" ]; then
-                      DETAILS="$DETAILS Address: \`$ADDRESS\`"
-                    fi
-                    echo "- $STATUS_ICON **$CONTRACT_NAME**: $DETAILS" >> $GITHUB_STEP_SUMMARY
-                  else
-                    ERROR=$(jq -r '.deployments[0].error // "Unknown error"' "$SUMMARY_FILE")
-                    echo "- ❌ **$CONTRACT_NAME**: Failed - $ERROR" >> $GITHUB_STEP_SUMMARY
-                  fi
-                fi
-              done
-            fi
+          if [ "${{ steps.parse_targets.outputs.deploy_1_4_1 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_1_4_1.outcome }}" in
+              "success") echo "| Safe 1.4.1 | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| Safe 1.4.1 | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| Safe 1.4.1 | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| Safe 1.4.1 | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_1_5_0 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_1_5_0.outcome }}" in
+              "success") echo "| Safe 1.5.0 | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| Safe 1.5.0 | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| Safe 1.5.0 | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| Safe 1.5.0 | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_modules }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_modules.outcome }}" in
+              "success") echo "| Safe Modules | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| Safe Modules | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| Safe Modules | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| Safe Modules | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_erc20 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_erc20.outcome }}" in
+              "success") echo "| ERC20 Token | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| ERC20 Token | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| ERC20 Token | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| ERC20 Token | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          fi
+          
+          if [ "${{ steps.parse_targets.outputs.deploy_erc721 }}" == "true" ]; then
+            TOTAL_COUNT=$((TOTAL_COUNT + 1))
+            case "${{ steps.deploy_erc721.outcome }}" in
+              "success") echo "| ERC721 NFT | ✅ Success |" >> $GITHUB_STEP_SUMMARY; SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+              "failure") echo "| ERC721 NFT | ❌ Failed |" >> $GITHUB_STEP_SUMMARY; FAILED_COUNT=$((FAILED_COUNT + 1)) ;;
+              "skipped") echo "| ERC721 NFT | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY; SKIPPED_COUNT=$((SKIPPED_COUNT + 1)) ;;
+              *) echo "| ERC721 NFT | ⚠️ Unknown |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Summary**: $SUCCESS_COUNT successful, $FAILED_COUNT failed, $SKIPPED_COUNT skipped out of $TOTAL_COUNT targets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Detailed contracts table
+          if [ -d "deployments" ]; then
+            SUMMARY_FILES=$(find deployments -name "github-actions-summary-*-latest.json" -type f 2>/dev/null | sort || true)
+            
+            if [ -n "$SUMMARY_FILES" ] && command -v jq &> /dev/null; then
+              echo "### 📋 Deployed Contracts" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Status | Contract | Address | Block |" >> $GITHUB_STEP_SUMMARY
+              echo "|:------:|----------|---------|-------|" >> $GITHUB_STEP_SUMMARY
+              
+              TOTAL_CONTRACTS=0
+              SUCCESSFUL_CONTRACTS=0
+              
+              for SUMMARY_FILE in $SUMMARY_FILES; do
+                if [ -f "$SUMMARY_FILE" ]; then
+                  # Read all deployments from the file
+                  jq -r '.deployments[] | "\(.success)|\(.contractName)|\(.contractAddress // .expectedAddress // "N/A")|\(.blockNumber // "N/A")|\(.txHash // "N/A")"' "$SUMMARY_FILE" 2>/dev/null | while IFS='|' read -r SUCCESS NAME ADDRESS BLOCK TX_HASH; do
+                    TOTAL_CONTRACTS=$((TOTAL_CONTRACTS + 1))
+                    if [ "$SUCCESS" = "true" ]; then
+                      SUCCESSFUL_CONTRACTS=$((SUCCESSFUL_CONTRACTS + 1))
+                      STATUS_ICON="✅"
+                      # Format address as code if valid
+                      if [ "$ADDRESS" != "N/A" ] && [ "$ADDRESS" != "null" ] && [ -n "$ADDRESS" ]; then
+                        ADDR_DISPLAY="\`$ADDRESS\`"
+                      else
+                        ADDR_DISPLAY="-"
+                      fi
+                      # Format block number
+                      if [ "$BLOCK" != "N/A" ] && [ "$BLOCK" != "null" ] && [ -n "$BLOCK" ]; then
+                        BLOCK_DISPLAY="$BLOCK"
+                      else
+                        BLOCK_DISPLAY="-"
+                      fi
+                    else
+                      STATUS_ICON="❌"
+                      ADDR_DISPLAY="-"
+                      BLOCK_DISPLAY="-"
+                    fi
+                    echo "| $STATUS_ICON | **$NAME** | $ADDR_DISPLAY | $BLOCK_DISPLAY |" >> $GITHUB_STEP_SUMMARY
+                  done
+                fi
+              done
+              
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "> 🕐 Deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload deployment artifacts
         if: always()

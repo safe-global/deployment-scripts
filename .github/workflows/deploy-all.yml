@@ -32,10 +32,23 @@ on:
         type: string
         default: '1'
 
+# Prevent concurrent deployments to the same network
+concurrency:
+  group: deploy-${{ github.event.inputs.network_name || 'custom' }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy All Contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+      BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+      NETWORK: ${{ github.event.inputs.network_name }}
+      CI: true
+      GITHUB_ACTIONS: true
     
     steps:
       - name: Checkout repository
@@ -55,18 +68,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-
-
-      - name: Install jq
+      - name: Validate required secrets and inputs
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends jq
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "$CUSTOM_RPC_URL" ]; then
+            echo "::error::CUSTOM_RPC_URL is required"
+            exit 1
+          fi
+          # Mask the full RPC URL to prevent API key leaks in logs
+          echo "::add-mask::$CUSTOM_RPC_URL"
+          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+          echo "::notice::Network: ${NETWORK:-custom}"
+          echo "::notice::RPC URL: $RPC_MASKED"
 
       - name: Parse and validate deployment targets
         id: parse_targets
@@ -151,29 +167,8 @@ jobs:
         if: steps.parse_targets.outputs.deploy_1_3_0 == 'true'
         id: deploy_1_3_0
         continue-on-error: true
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
           echo "::notice::Deploying Safe 1.3.0 Canonical contracts..."
-          echo "Network: ${NETWORK:-custom}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
           pnpm deploy-1.3.0-canonical --network "${NETWORK:-custom}" || exit 1
           echo "deploy_1_3_0_status=success" >> $GITHUB_OUTPUT
 
@@ -181,29 +176,8 @@ jobs:
         if: steps.parse_targets.outputs.deploy_1_4_1 == 'true'
         id: deploy_1_4_1
         continue-on-error: true
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
           echo "::notice::Deploying Safe 1.4.1 contracts..."
-          echo "Network: ${NETWORK:-custom}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
           pnpm deploy-1.4.1 --network "${NETWORK:-custom}" || exit 1
           echo "deploy_1_4_1_status=success" >> $GITHUB_OUTPUT
 
@@ -211,29 +185,8 @@ jobs:
         if: steps.parse_targets.outputs.deploy_1_5_0 == 'true'
         id: deploy_1_5_0
         continue-on-error: true
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
           echo "::notice::Deploying Safe 1.5.0 contracts..."
-          echo "Network: ${NETWORK:-custom}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
           pnpm deploy-1.5.0 --network "${NETWORK:-custom}" || exit 1
           echo "deploy_1_5_0_status=success" >> $GITHUB_OUTPUT
 
@@ -241,29 +194,8 @@ jobs:
         if: steps.parse_targets.outputs.deploy_modules == 'true'
         id: deploy_modules
         continue-on-error: true
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
           echo "::notice::Deploying Safe Modules contracts..."
-          echo "Network: ${NETWORK:-custom}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
           pnpm deploy-modules --network "${NETWORK:-custom}" || exit 1
           echo "deploy_modules_status=success" >> $GITHUB_OUTPUT
 
@@ -272,30 +204,9 @@ jobs:
         id: deploy_erc20
         continue-on-error: true
         env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
           ERC20_MINT_AMOUNT: ${{ github.event.inputs.erc20_mint_amount }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
-          echo "::notice::Deploying ERC20 token contract..."
-          echo "Network: ${NETWORK:-custom}"
-          echo "Mint amount: ${ERC20_MINT_AMOUNT:-1000}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
+          echo "::notice::Deploying ERC20 token contract (mint: ${ERC20_MINT_AMOUNT:-1000})..."
           pnpm deploy-erc20 --network "${NETWORK:-custom}" || exit 1
           echo "deploy_erc20_status=success" >> $GITHUB_OUTPUT
 
@@ -304,30 +215,9 @@ jobs:
         id: deploy_erc721
         continue-on-error: true
         env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
           ERC721_TOKEN_ID: ${{ github.event.inputs.erc721_token_id }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
-          echo "::notice::Deploying ERC721 NFT contract..."
-          echo "Network: ${NETWORK:-custom}"
-          echo "Token ID: ${ERC721_TOKEN_ID:-1}"
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
+          echo "::notice::Deploying ERC721 NFT contract (tokenId: ${ERC721_TOKEN_ID:-1})..."
           pnpm deploy-nft --network "${NETWORK:-custom}" || exit 1
           echo "deploy_erc721_status=success" >> $GITHUB_OUTPUT
 

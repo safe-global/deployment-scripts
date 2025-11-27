@@ -30,11 +30,6 @@ jobs:
             echo "## Deployment Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             
-            # Install jq if not available
-            if ! command -v jq &> /dev/null; then
-              sudo apt-get update && sudo apt-get install -y jq
-            fi
-            
             # Extract key information
             NETWORK=$(jq -r '.network' ./deployment-artifacts/deployment-summary.json)
             CHAIN_ID=$(jq -r '.chainId' ./deployment-artifacts/deployment-summary.json)

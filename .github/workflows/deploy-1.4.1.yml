@@ -17,10 +17,23 @@ on:
         type: string
         default: 'custom'
 
+# Prevent concurrent deployments to the same network
+concurrency:
+  group: deploy-${{ github.event.inputs.network_name || 'custom' }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy Safe 1.4.1 Contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+      BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+      NETWORK: ${{ github.event.inputs.network_name }}
+      CI: true
+      GITHUB_ACTIONS: true
     
     steps:
       - name: Checkout repository
@@ -40,50 +53,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-
-
-      - name: Install jq
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends jq
-
-      - name: Deploy Safe 1.4.1 Contracts
-        id: deploy
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          CI: true
-          GITHUB_ACTIONS: true
+      - name: Validate required secrets and inputs
         run: |
           if [ -z "$PRIVATE_KEY" ]; then
             echo "::error::PRIVATE_KEY secret is not set"
             exit 1
           fi
-          
           if [ -z "$CUSTOM_RPC_URL" ]; then
             echo "::error::CUSTOM_RPC_URL is required"
             exit 1
           fi
-          
-          echo "::notice::Deploying Safe 1.4.1 contracts..."
-          echo "Network: ${NETWORK:-custom}"
-          echo "Chain ID will be fetched from RPC..."
-          # Mask RPC URL - show only protocol and hostname
+          # Mask the full RPC URL to prevent API key leaks in logs
+          echo "::add-mask::$CUSTOM_RPC_URL"
           RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
-          if [ -n "$BLOCK_EXPLORER_URL" ]; then
-            echo "Block Explorer: $BLOCK_EXPLORER_URL"
-          fi
-          
+          echo "::notice::Network: ${NETWORK:-custom}"
+          echo "::notice::RPC URL: $RPC_MASKED"
+
+      - name: Deploy Safe 1.4.1 Contracts
+        id: deploy
+        run: |
+          echo "::notice::Deploying Safe 1.4.1 contracts..."
           pnpm deploy-1.4.1 --network "${NETWORK:-custom}"
 
       - name: Display deployment summary

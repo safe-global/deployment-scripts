@@ -37,10 +37,23 @@ on:
         type: string
         default: '1'
 
+# Prevent concurrent deployments to the same network
+concurrency:
+  group: deploy-${{ github.event.inputs.network_name || 'custom' }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy Token Contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
+      BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
+      NETWORK: ${{ github.event.inputs.network_name }}
+      CI: true
+      GITHUB_ACTIONS: true
     
     steps:
       - name: Checkout repository
@@ -60,89 +73,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('/etc/apt/sources.list', '/etc/apt/sources.list.d/*') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-
-
-      - name: Install jq
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends jq
-
-      - name: Deploy ERC20 Token
-        if: ${{ github.event.inputs.deploy_erc20 == 'true' }}
-        id: deploy_erc20
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
-          ERC20_MINT_AMOUNT: ${{ github.event.inputs.erc20_mint_amount }}
-          CI: true
-          GITHUB_ACTIONS: true
+      - name: Validate required secrets and inputs
         run: |
           if [ -z "$PRIVATE_KEY" ]; then
             echo "::error::PRIVATE_KEY secret is not set"
             exit 1
           fi
-          
           if [ -z "$CUSTOM_RPC_URL" ]; then
             echo "::error::CUSTOM_RPC_URL is required"
             exit 1
           fi
-          
-          echo "::notice::Deploying ERC20 token contract..."
-          echo "Network: ${NETWORK:-custom}"
-          echo "Mint amount: ${ERC20_MINT_AMOUNT:-1000}"
-          echo "Chain ID will be fetched from RPC..."
-          # Mask RPC URL - show only protocol and hostname
+          # Mask the full RPC URL to prevent API key leaks in logs
+          echo "::add-mask::$CUSTOM_RPC_URL"
           RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
-          if [ -n "$BLOCK_EXPLORER_URL" ]; then
-            echo "Block Explorer: $BLOCK_EXPLORER_URL"
-          fi
-          
+          echo "::notice::Network: ${NETWORK:-custom}"
+          echo "::notice::RPC URL: $RPC_MASKED"
+
+      - name: Deploy ERC20 Token
+        if: ${{ github.event.inputs.deploy_erc20 == 'true' }}
+        id: deploy_erc20
+        env:
+          ERC20_MINT_AMOUNT: ${{ github.event.inputs.erc20_mint_amount }}
+        run: |
+          echo "::notice::Deploying ERC20 token contract (mint: ${ERC20_MINT_AMOUNT:-1000})..."
           pnpm deploy-erc20 --network "${NETWORK:-custom}"
 
       - name: Deploy ERC721 NFT
         if: ${{ github.event.inputs.deploy_erc721 == 'true' }}
         id: deploy_erc721
         env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          CUSTOM_RPC_URL: ${{ github.event.inputs.custom_rpc_url }}
-          BLOCK_EXPLORER_URL: ${{ github.event.inputs.block_explorer_url }}
-          NETWORK: ${{ github.event.inputs.network_name }}
           ERC721_TOKEN_ID: ${{ github.event.inputs.erc721_token_id }}
-          CI: true
-          GITHUB_ACTIONS: true
         run: |
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "::error::PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_RPC_URL" ]; then
-            echo "::error::CUSTOM_RPC_URL is required"
-            exit 1
-          fi
-          
-          echo "::notice::Deploying ERC721 NFT contract..."
-          echo "Network: ${NETWORK:-custom}"
-          echo "Token ID: ${ERC721_TOKEN_ID:-1}"
-          echo "Chain ID will be fetched from RPC..."
-          # Mask RPC URL - show only protocol and hostname
-          RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-          echo "RPC URL: $RPC_MASKED"
-          
-          if [ -n "$BLOCK_EXPLORER_URL" ]; then
-            echo "Block Explorer: $BLOCK_EXPLORER_URL"
-          fi
-          
+          echo "::notice::Deploying ERC721 NFT contract (tokenId: ${ERC721_TOKEN_ID:-1})..."
           pnpm deploy-nft --network "${NETWORK:-custom}"
 
       - name: Display deployment summary

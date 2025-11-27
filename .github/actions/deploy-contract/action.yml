@@ -4,6 +4,9 @@ inputs:
   script_name:
     description: 'Name of the deployment script to run (e.g., deploy-erc20)'
     required: true
+  private_key:
+    description: 'Private key for deployment (pass from secrets.PRIVATE_KEY)'
+    required: true
   network_name:
     description: 'Network name for the deployment'
     required: false
@@ -50,17 +53,26 @@ runs:
           echo "::error::script_name is required"
           exit 1
         fi
+        if [ -z "${{ inputs.private_key }}" ]; then
+          echo "::error::private_key is required (pass secrets.PRIVATE_KEY)"
+          exit 1
+        fi
         if [ -z "${{ inputs.custom_rpc_url }}" ]; then
           echo "::error::custom_rpc_url is required"
           exit 1
         fi
+        # Mask the full RPC URL to prevent API key leaks in logs
+        echo "::add-mask::${{ inputs.custom_rpc_url }}"
+        RPC_MASKED=$(echo "${{ inputs.custom_rpc_url }}" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
+        echo "::notice::Network: ${{ inputs.network_name }}"
+        echo "::notice::RPC URL: $RPC_MASKED"
 
     - name: Deploy contract
       id: deploy
       shell: bash
       continue-on-error: true
       env:
-        PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        PRIVATE_KEY: ${{ inputs.private_key }}
         CUSTOM_RPC_URL: ${{ inputs.custom_rpc_url }}
         BLOCK_EXPLORER_URL: ${{ inputs.block_explorer_url }}
         NETWORK: ${{ inputs.network_name }}
@@ -69,22 +81,7 @@ runs:
         CI: true
         GITHUB_ACTIONS: true
       run: |
-        if [ -z "$PRIVATE_KEY" ]; then
-          echo "::error::PRIVATE_KEY secret is not set"
-          exit 1
-        fi
-        
-        if [ -z "$CUSTOM_RPC_URL" ]; then
-          echo "::error::CUSTOM_RPC_URL is required"
-          exit 1
-        fi
-        
         echo "::notice::Deploying contract using script: ${{ inputs.script_name }}"
-        echo "Network: ${NETWORK:-custom}"
-        
-        # Mask RPC URL for security
-        RPC_MASKED=$(echo "$CUSTOM_RPC_URL" | sed -E 's|(https?://[^/?#]+).*|\1/***|')
-        echo "RPC URL: $RPC_MASKED"
         
         # Run the deployment script
         if pnpm ${{ inputs.script_name }} --network "${NETWORK:-custom}"; then
